@@ -4,10 +4,13 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { parseTextIntent } from '../services/apiService';
+import { applyIntent } from '../services/calendarIntentService';
 import { getEventsByDate, initDatabase } from '../services/storageService';
 import type { CalendarEvent } from '../types/event';
 
@@ -16,6 +19,8 @@ const today = new Date().toISOString().slice(0, 10);
 export function CalendarScreen() {
   const [selectedDate, setSelectedDate] = useState(today);
   const [selectedEvents, setSelectedEvents] = useState<CalendarEvent[]>([]);
+  const [debugText, setDebugText] = useState('');
+  const [debugResult, setDebugResult] = useState('');
   const [storageError, setStorageError] = useState('');
 
   useEffect(() => {
@@ -44,6 +49,50 @@ export function CalendarScreen() {
       isActive = false;
     };
   }, [selectedDate]);
+
+  async function reloadEvents(date: string) {
+    const events = await getEventsByDate(date);
+    setSelectedEvents(events);
+    setStorageError('');
+  }
+
+  async function handleDebugSubmit() {
+    const text = debugText.trim();
+
+    if (!text) {
+      setDebugResult('请输入一句日程指令');
+      return;
+    }
+
+    try {
+      const intent = await parseTextIntent(text);
+      const result = await applyIntent(intent);
+
+      if (result.type === 'added') {
+        setSelectedDate(result.event.date);
+        await reloadEvents(result.event.date);
+        setDebugResult(`已添加：${result.event.title}`);
+        setDebugText('');
+        return;
+      }
+
+      if (result.type === 'query') {
+        setSelectedDate(result.date);
+        setSelectedEvents(result.events);
+        setDebugResult(`查询到 ${result.events.length} 个日程`);
+        return;
+      }
+
+      if (result.type === 'delete_candidates') {
+        setDebugResult(`找到 ${result.events.length} 个待删除日程`);
+        return;
+      }
+
+      setDebugResult(result.message);
+    } catch {
+      setDebugResult('文本解析失败，请确认后端已启动');
+    }
+  }
 
   const markedDates = useMemo(
     () => ({
@@ -92,6 +141,20 @@ export function CalendarScreen() {
             }}
           />
         </View>
+
+        <View style={styles.debugPanel}>
+          <TextInput
+            style={styles.debugInput}
+            value={debugText}
+            onChangeText={setDebugText}
+            placeholder="输入语音文本调试"
+            placeholderTextColor="#98a2b3"
+          />
+          <Pressable style={styles.debugButton} onPress={handleDebugSubmit}>
+            <Text style={styles.debugButtonText}>解析文本</Text>
+          </Pressable>
+        </View>
+        {debugResult ? <Text style={styles.debugResult}>{debugResult}</Text> : null}
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>{formatDateLabel(selectedDate)}</Text>
@@ -187,6 +250,42 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     overflow: 'hidden',
+  },
+  debugPanel: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  debugInput: {
+    backgroundColor: '#ffffff',
+    borderColor: '#d0d5dd',
+    borderRadius: 8,
+    borderWidth: 1,
+    color: '#101828',
+    flex: 1,
+    fontSize: 14,
+    height: 42,
+    paddingHorizontal: 12,
+  },
+  debugButton: {
+    alignItems: 'center',
+    backgroundColor: '#1677ff',
+    borderRadius: 8,
+    height: 42,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  debugButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  debugResult: {
+    color: '#475467',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 8,
   },
   sectionHeader: {
     alignItems: 'center',

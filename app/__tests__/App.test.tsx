@@ -60,3 +60,15 @@ test('shows empty state when selected date has no stored events', async () => {
 
   expect(emptyNodes.length).toBeGreaterThan(0);
 });
+
+test('renders text intent debug input', async () => {
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(<App />);
+  });
+
+  expect(
+    renderer!.root.findAllByProps({placeholder: '输入语音文本调试'}).length,
+  ).toBeGreaterThan(0);
+});
