@@ -27,6 +27,11 @@ jest.mock('react-native-safe-area-context', () => {
   };
 });
 
+jest.mock('../src/services/storageService', () => ({
+  getEventsByDate: jest.fn(() => Promise.resolve([])),
+  initDatabase: jest.fn(() => Promise.resolve()),
+}));
+
 test('renders VocaCal calendar shell', async () => {
   let renderer: ReactTestRenderer.ReactTestRenderer;
 
@@ -40,4 +45,18 @@ test('renders VocaCal calendar shell', async () => {
 
   expect(titleNodes.length).toBeGreaterThan(0);
   expect(titleNodes[0].props.children).toBe('VocaCal');
+});
+
+test('shows empty state when selected date has no stored events', async () => {
+  let renderer: ReactTestRenderer.ReactTestRenderer;
+
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(<App />);
+  });
+
+  const emptyNodes = renderer!.root
+    .findAllByProps({testID: 'empty-events-title'})
+    .filter(node => node.props.children === '暂无日程');
+
+  expect(emptyNodes.length).toBeGreaterThan(0);
 });

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -8,32 +8,42 @@ import {
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { getEventsByDate, initDatabase } from '../services/storageService';
 import type { CalendarEvent } from '../types/event';
 
 const today = new Date().toISOString().slice(0, 10);
 
-const sampleEvents: CalendarEvent[] = [
-  {
-    id: 1,
-    title: '项目周会',
-    date: today,
-    time: '15:00',
-    note: '语音示例：今天下午三点项目周会',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
-
 export function CalendarScreen() {
   const [selectedDate, setSelectedDate] = useState(today);
+  const [selectedEvents, setSelectedEvents] = useState<CalendarEvent[]>([]);
+  const [storageError, setStorageError] = useState('');
 
-  const selectedEvents = useMemo(
-    () =>
-      sampleEvents
-        .filter(event => event.date === selectedDate)
-        .sort((left, right) => (left.time ?? '24:00').localeCompare(right.time ?? '24:00')),
-    [selectedDate],
-  );
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadEvents() {
+      try {
+        await initDatabase();
+        const events = await getEventsByDate(selectedDate);
+
+        if (isActive) {
+          setSelectedEvents(events);
+          setStorageError('');
+        }
+      } catch {
+        if (isActive) {
+          setStorageError('日程加载失败，请稍后重试');
+          setSelectedEvents([]);
+        }
+      }
+    }
+
+    loadEvents();
+
+    return () => {
+      isActive = false;
+    };
+  }, [selectedDate]);
 
   const markedDates = useMemo(
     () => ({
@@ -93,9 +103,13 @@ export function CalendarScreen() {
           contentContainerStyle={styles.eventListContent}
           showsVerticalScrollIndicator={false}
         >
-          {selectedEvents.length === 0 ? (
+          {storageError ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>暂无日程</Text>
+              <Text style={styles.emptyTitle}>{storageError}</Text>
+            </View>
+          ) : selectedEvents.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle} testID="empty-events-title">暂无日程</Text>
               <Text style={styles.emptyText}>按住下方按钮，说出“明天下午三点开会”。</Text>
             </View>
           ) : (
