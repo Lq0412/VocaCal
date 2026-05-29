@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -8,9 +8,12 @@ class NLUParseRequest(BaseModel):
     text: str
 
 
+CalendarIntent = Literal["ADD_EVENT", "DELETE_EVENT", "QUERY_EVENT"]
+
+
 class NLUResult(BaseModel):
     """DeepSeek NLU 解析结果"""
-    intent: Optional[str] = None
+    intent: Optional[CalendarIntent] = None
     title: Optional[str] = None
     date: Optional[str] = None
     time: Optional[str] = None

@@ -50,6 +50,9 @@ def _extract_json(text: str) -> dict:
 
 async def parse_intent(text: str) -> NLUResult:
     """将文字解析为日历意图，失败时返回 intent=None"""
+    if not settings.deepseek_api_key:
+        return NLUResult(intent=None, raw=text)
+
     today = date.today()
     weekday = _WEEKDAYS[today.weekday()]
     prompt = _SYSTEM_PROMPT.format(today=today.isoformat(), weekday=weekday)
