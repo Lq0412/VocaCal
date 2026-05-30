@@ -1,6 +1,5 @@
-"""DeepSeek NLU 意图解析 — 将自然语言文字解析为结构化日历意图"""
-
 import json
+import logging
 import re
 from datetime import date
 
@@ -8,6 +7,8 @@ import httpx
 
 from config import settings
 from models.schemas import NLUResult
+
+logger = logging.getLogger("nlu")
 
 _SYSTEM_PROMPT = """你是一个日历事件解析助手。根据用户的语音输入，提取意图和事件信息，以 JSON 返回。
 
@@ -40,17 +41,16 @@ _WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日
 
 def _extract_json(text: str) -> dict:
     """从模型输出中提取 JSON，兼容 markdown 代码块包裹"""
-    # 剥离 ```json ... ```
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    match = re.search(r"`(?:json)?\s*(\{.*?\})\s*`", text, re.DOTALL)
     if match:
         return json.loads(match.group(1))
-    # 直接解析
     return json.loads(text.strip())
 
 
 async def parse_intent(text: str) -> NLUResult:
     """将文字解析为日历意图，失败时返回 intent=None"""
     if not settings.deepseek_api_key:
+        logger.warning("DEEPSEEK_API_KEY is empty, skipping NLU")
         return NLUResult(intent=None, raw=text)
 
     today = date.today()
@@ -73,6 +73,7 @@ async def parse_intent(text: str) -> NLUResult:
             )
             resp.raise_for_status()
             content = resp.json()["choices"][0]["message"]["content"]
+            logger.info(f"DeepSeek response: {content!r}")
 
         parsed = _extract_json(content)
         return NLUResult(
@@ -82,5 +83,6 @@ async def parse_intent(text: str) -> NLUResult:
             time=parsed.get("time"),
             raw=text,
         )
-    except Exception:
+    except Exception as e:
+        logger.error(f"NLU parse failed: {type(e).__name__}: {e}")
         return NLUResult(intent=None, raw=text)
