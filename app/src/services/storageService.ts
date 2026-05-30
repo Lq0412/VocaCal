@@ -122,6 +122,56 @@ export async function deleteEvent(id: number): Promise<void> {
   await executeSql('DELETE FROM events WHERE id = ?', [id]);
 }
 
+/**
+ * 更新事件的标题、日期或时间（用于修改事件）
+ */
+export async function updateEvent(
+  id: number,
+  updates: { title?: string; date?: string; time?: string },
+): Promise<void> {
+  const setClauses: string[] = [];
+  const params: unknown[] = [];
+
+  if (updates.title !== undefined) {
+    setClauses.push('title = ?');
+    params.push(updates.title);
+  }
+  if (updates.date !== undefined) {
+    setClauses.push('date = ?');
+    params.push(updates.date);
+  }
+  if (updates.time !== undefined) {
+    setClauses.push('time = ?');
+    params.push(updates.time);
+  }
+
+  if (setClauses.length === 0) return;
+
+  setClauses.push('updated_at = ?');
+  params.push(new Date().toISOString());
+  params.push(id);
+
+  await executeSql(
+    `UPDATE events SET ${setClauses.join(', ')} WHERE id = ?`,
+    params,
+  );
+}
+
+/**
+ * 获取所有有事件的日期列表（用于日历标记小圆点）
+ */
+export async function getAllEventDates(): Promise<string[]> {
+  const result = await executeSql(
+    'SELECT DISTINCT date FROM events ORDER BY date',
+  );
+
+  const dates: string[] = [];
+  for (let i = 0; i < result.rows.length; i += 1) {
+    dates.push(result.rows.item(i).date);
+  }
+  return dates;
+}
+
 function rowsToEvents(result: ResultSet): CalendarEvent[] {
   const events: CalendarEvent[] = [];
 

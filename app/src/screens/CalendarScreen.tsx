@@ -1,5 +1,20 @@
-import React, { useEffect, useState } from 'react';
+/**
+ * CalendarScreen — VocaCal 主界面
+ *
+ * 功能：
+ * - 语音/文字添加、查询、删除日程
+ * - 日历标记已有事件日期（小圆点）
+ * - 删除确认弹窗（单选/多选）
+ * - 事件卡片长按删除
+ * - 录音脉冲动画
+ * - TTS 语音回复播放
+ */
+
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
+  Animated,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,7 +26,13 @@ import { Calendar } from 'react-native-calendars';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { parseTextIntent, processVoice, API_BASE_URL } from '../services/apiService';
 import { applyIntent } from '../services/calendarIntentService';
-import { getEventsByDate, initDatabase } from '../services/storageService';
+import {
+  deleteEvent,
+  getAllEventDates,
+  getEventsByDate,
+  initDatabase,
+  updateEvent,
+} from '../services/storageService';
 import {
   playFromUrl,
   requestRecordPermission,
@@ -23,415 +44,640 @@ import type { CalendarEvent } from '../types/event';
 
 const today = new Date().toISOString().slice(0, 10);
 
+/** 主界面组件 */
 export function CalendarScreen() {
   const [selectedDate, setSelectedDate] = useState(today);
   const [selectedEvents, setSelectedEvents] = useState<CalendarEvent[]>([]);
-  const [debugText, setDebugText] = useState('');
-  const [debugResult, setDebugResult] = useState('');
-  const [storageError, setStorageError] = useState('');
+  const [eventDates, setEventDates] = useState<string[]>([]);
+  const [statusMessage, setStatusMessage] = useState('');
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+  const [debugText, setDebugText] = useState('');
+  const [pulseAnim] = useState(new Animated.Value(1));
+  const [deleteCandidates, setDeleteCandidates] = useState<CalendarEvent[]>([]);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const pulseAnimRef = useRef<Animated.CompositeAnimation | null>(null);
 
+  // --- 加载事件 ---
   useEffect(() => {
     let isActive = true;
-
     async function loadEvents() {
       try {
         await initDatabase();
-        const events = await getEventsByDate(selectedDate);
-
         if (isActive) {
+          const events = await getEventsByDate(selectedDate);
           setSelectedEvents(events);
-          setStorageError('');
+          // 加载所有有事件的日期
+          const dates = await getAllEventDates();
+          setEventDates(dates);
         }
       } catch (e: any) {
         if (isActive) {
-          setStorageError('数据库错误: ' + (e?.message || String(e)));
-          setSelectedEvents([]);
+          setStatusMessage('数据库错误: ' + (e?.message || String(e)));
         }
       }
     }
-
     loadEvents();
-
-    return () => {
-      isActive = false;
-    };
+    return () => { isActive = false; };
   }, [selectedDate]);
 
-  async function reloadEvents(date: string) {
+  /** 刷新事件列表和日期标记 */
+  const reloadEvents = useCallback(async (date: string) => {
     const events = await getEventsByDate(date);
     setSelectedEvents(events);
-    setStorageError('');
-  }
+    const dates = await getAllEventDates();
+    setEventDates(dates);
+  }, []);
 
-  async function handleDebugSubmit() {
+  // --- 录音脉冲动画 ---
+  useEffect(() => {
+    if (voiceState === 'recording') {
+      const animation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 1.18, duration: 600, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+        ]),
+      );
+      pulseAnimRef.current = animation;
+      animation.start();
+    } else {
+      if (pulseAnimRef.current) {
+        pulseAnimRef.current.stop();
+        pulseAnimRef.current = null;
+      }
+      pulseAnim.setValue(1);
+    }
+  }, [voiceState, pulseAnim]);
+
+  // --- 构建日历标记 ---
+  const markedDates = React.useMemo(() => {
+    const marks: Record<string, any> = {};
+    for (const d of eventDates) {
+      marks[d] = {
+        marked: true,
+        dotColor: '#6C5CE7',
+      };
+    }
+    // 选中日期
+    marks[selectedDate] = {
+      ...(marks[selectedDate] || {}),
+      selected: true,
+      selectedColor: '#6C5CE7',
+    };
+    return marks;
+  }, [eventDates, selectedDate]);
+
+  // --- 处理 NLU 意图结果 ---
+  const handleIntentResult = useCallback(async (intent: {
+    intent: string | null;
+    title: string | null;
+    date: string | null;
+    time: string | null;
+    raw: string;
+  }) => {
+    const result = await applyIntent(intent as any);
+
+    if (result.type === 'added') {
+      setSelectedDate(result.event.date);
+      await reloadEvents(result.event.date);
+      setStatusMessage('✅ 已添加：' + result.event.title +
+        (result.event.time ? '（' + result.event.time + '）' : ''));
+      return;
+    }
+
+    if (result.type === 'query') {
+      setSelectedDate(result.date);
+      setSelectedEvents(result.events);
+      if (result.events.length > 0) {
+        const summary = result.events
+          .map(e => (e.time ? e.time + ' ' : '') + e.title)
+          .join('、');
+        setStatusMessage('📋 ' + result.events.length + ' 个日程：' + summary);
+      } else {
+        setStatusMessage('📋 该日期暂无日程');
+      }
+      return;
+    }
+
+    if (result.type === 'delete_candidates') {
+      if (result.events.length === 0) {
+        setStatusMessage('❌ 未找到匹配的日程');
+        return;
+      }
+      if (result.events.length === 1) {
+        // 单条直接弹确认
+        const event = result.events[0];
+        Alert.alert(
+          '确认删除',
+          '删除「' + event.title + '」' + (event.time ? '（' + event.time + '）' : '（全天）') + '？',
+          [
+            { text: '取消', style: 'cancel' },
+            {
+              text: '删除',
+              style: 'destructive',
+              onPress: async () => {
+                await deleteEvent(event.id);
+                await reloadEvents(selectedDate);
+                setStatusMessage('🗑️ 已删除：' + event.title);
+              },
+            },
+          ],
+        );
+        return;
+      }
+      // 多条 → 弹出自定义选择弹窗
+      setDeleteCandidates(result.events);
+      setShowDeleteModal(true);
+      return;
+    }
+
+    if (result.type === 'modify_candidates') {
+      if (result.events.length === 0) {
+        setStatusMessage('❌ 未找到要修改的日程');
+        return;
+      }
+      const event = result.events[0];
+      const updates: { title?: string; date?: string; time?: string } = {};
+      if (result.newTitle) updates.title = result.newTitle;
+      if (result.newDate) updates.date = result.newDate;
+      if (result.newTime) updates.time = result.newTime;
+
+      Alert.alert(
+        '确认修改',
+        '修改「' + event.title + '」？',
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '确认',
+            onPress: async () => {
+              await updateEvent(event.id, updates);
+              const targetDate = result.newDate || selectedDate;
+              setSelectedDate(targetDate);
+              await reloadEvents(targetDate);
+              setStatusMessage('✏️ 已修改：' + (result.newTitle || event.title));
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    setStatusMessage(result.message || '🤔 抱歉没理解，试试说：明天下午三点开会');
+  }, [selectedDate, reloadEvents]);
+
+  /** 删除单个事件（从弹窗中选择） */
+  const handleDeleteFromModal = useCallback(async (event: CalendarEvent) => {
+    await deleteEvent(event.id);
+    const remaining = deleteCandidates.filter(e => e.id !== event.id);
+    setDeleteCandidates(remaining);
+    if (remaining.length === 0) {
+      setShowDeleteModal(false);
+    }
+    await reloadEvents(selectedDate);
+    setStatusMessage('🗑️ 已删除：' + event.title);
+  }, [deleteCandidates, selectedDate, reloadEvents]);
+
+  /** 长按事件卡片删除 */
+  const handleEventLongPress = useCallback((event: CalendarEvent) => {
+    Alert.alert(
+      '删除日程',
+      '确定删除「' + event.title + '」？',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '删除',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteEvent(event.id);
+            await reloadEvents(selectedDate);
+            setStatusMessage('🗑️ 已删除：' + event.title);
+          },
+        },
+      ],
+    );
+  }, [selectedDate, reloadEvents]);
+
+  // --- 文本输入调试 ---
+  const handleDebugSubmit = useCallback(async () => {
     const text = debugText.trim();
-
-    if (!text) {
-      setDebugResult('请输入一句日程指令');
-      return;
-    }
-
+    if (!text) return;
     try {
-      setDebugResult('正在解析...');
+      setStatusMessage('⏳ 正在解析...');
       const intent = await parseTextIntent(text);
-      setDebugResult('NLU结果: intent=' + intent.intent + ' title=' + intent.title + ' date=' + intent.date + ' time=' + intent.time);
-
-      const result = await applyIntent(intent);
-
-      if (result.type === 'added') {
-        setSelectedDate(result.event.date);
-        await reloadEvents(result.event.date);
-        setDebugResult('已添加：' + result.event.title);
-        setDebugText('');
-        return;
-      }
-
-      if (result.type === 'query') {
-        setSelectedDate(result.date);
-        setSelectedEvents(result.events);
-        setDebugResult('查询到 ' + result.events.length + ' 个日程');
-        return;
-      }
-
-      if (result.type === 'delete_candidates') {
-        setDebugResult('找到 ' + result.events.length + ' 个待删除日程');
-        return;
-      }
-
-      setDebugResult(result.message);
+      await handleIntentResult(intent);
+      setDebugText('');
     } catch (e: any) {
-      setDebugResult('错误: ' + (e?.message || String(e)));
+      setStatusMessage('❌ 解析失败：' + (e?.message || '请检查网络'));
     }
-  }
+  }, [debugText, handleIntentResult]);
 
-  async function handleVoiceStart() {
-    if (voiceState !== 'idle') {
-      return;
-    }
+  // --- 语音操作 ---
+  const handleVoiceStart = useCallback(async () => {
+    if (voiceState !== 'idle') return;
 
     const granted = await requestRecordPermission();
     if (!granted) {
-      setDebugResult('需要录音权限才能使用语音功能');
+      setStatusMessage('⚠️ 需要录音权限才能使用语音功能');
       return;
     }
 
     try {
       await startRecording();
       setVoiceState('recording');
-    } catch (e: any) {
-      if (e?.message === 'VOICE_NOT_AVAILABLE') {
-        setDebugResult('语音录音暂不可用，请使用文本输入调试');
-      } else {
-        setDebugResult('录音启动失败');
-      }
+      setStatusMessage('🎙️ 正在录音，松开结束...');
+    } catch {
+      setStatusMessage('❌ 录音启动失败');
     }
-  }
+  }, [voiceState]);
 
-  async function handleVoiceStop() {
-    if (voiceState !== 'recording') {
-      return;
-    }
+  const handleVoiceStop = useCallback(async () => {
+    if (voiceState !== 'recording') return;
 
     setVoiceState('processing');
+    setStatusMessage('⏳ 处理中...');
 
     try {
       const path = await stopRecording();
       const result = await processVoice(path);
 
-      setDebugResult(result.text ? '识别：' + result.text : '未识别到语音');
-
-      if (result.event?.intent) {
-        const applyResult = await applyIntent(result.event);
-
-        if (applyResult.type === 'added') {
-          setSelectedDate(applyResult.event.date);
-          await reloadEvents(applyResult.event.date);
-          setDebugResult('已添加：' + applyResult.event.title);
-        } else if (applyResult.type === 'query') {
-          setSelectedDate(applyResult.date);
-          setSelectedEvents(applyResult.events);
-          setDebugResult('查询到 ' + applyResult.events.length + ' 个日程');
-        } else if (applyResult.type === 'delete_candidates') {
-          setDebugResult('找到 ' + applyResult.events.length + ' 个待删除日程');
-        } else {
-          setDebugResult(applyResult.message);
-        }
-      } else if (result.reply_text) {
-        setDebugResult(result.reply_text);
+      if (result.text) {
+        setStatusMessage('🗣️ 识别：' + result.text);
       }
 
+      if (result.event?.intent) {
+        await handleIntentResult(result.event);
+      } else if (result.reply_text) {
+        setStatusMessage(result.reply_text);
+      }
+
+      // TTS 播放语音回复
       if (result.reply_text) {
         const ttsUrl = API_BASE_URL + '/api/tts/speak?text=' + encodeURIComponent(result.reply_text);
         playFromUrl(ttsUrl);
       }
     } catch (e: any) {
-      setDebugResult('语音错误: ' + (e?.message || String(e)));
+      setStatusMessage('❌ 语音处理失败：' + (e?.message || '请重试'));
+    } finally {
+      setVoiceState('idle');
     }
-  }
+  }, [voiceState, handleIntentResult]);
+
+  // ==================== 渲染 ====================
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
+        {/* 标题栏 */}
         <View style={styles.header}>
           <View>
             <Text style={styles.title}>VocaCal</Text>
             <Text style={styles.subtitle}>语音日历助手</Text>
           </View>
-          <View style={styles.statusBadge}>
-            <Text style={styles.statusText}>调试模式</Text>
+          <View style={styles.todayBadge}>
+            <Text style={styles.todayBadgeText}>
+              {new Date().getMonth() + 1}月{new Date().getDate()}日
+            </Text>
           </View>
         </View>
 
+        {/* 日历组件 */}
         <View style={styles.calendarPanel}>
           <Calendar
             onDayPress={(day: any) => setSelectedDate(day.dateString)}
-            markedDates={{
-              [selectedDate]: {selected: true, selectedColor: '#1677ff'},
-            }}
+            markedDates={markedDates}
             theme={{
-              todayTextColor: '#1677ff',
-              selectedDayBackgroundColor: '#1677ff',
-              arrowColor: '#1677ff',
+              todayTextColor: '#FDCB6E',
+              selectedDayBackgroundColor: '#6C5CE7',
+              arrowColor: '#6C5CE7',
+              textDayFontWeight: '400',
+              textMonthFontWeight: '700',
+              dotColor: '#6C5CE7',
+              selectedDotColor: '#ffffff',
             }}
           />
         </View>
 
-        <View style={styles.debugPanel}>
+        {/* 文本输入 */}
+        <View style={styles.inputRow}>
           <TextInput
-            style={styles.debugInput}
+            style={styles.textInput}
             value={debugText}
             onChangeText={setDebugText}
-            placeholder="输入指令调试，如：明天下午三点开会"
+            placeholder="输入指令，如：明天下午三点开会"
             placeholderTextColor="#98a2b3"
             onSubmitEditing={handleDebugSubmit}
             returnKeyType="send"
           />
-          <Pressable style={styles.debugButton} onPress={handleDebugSubmit}>
-            <Text style={styles.debugButtonText}>发送</Text>
+          <Pressable style={styles.sendButton} onPress={handleDebugSubmit}>
+            <Text style={styles.sendButtonText}>发送</Text>
           </Pressable>
         </View>
 
-        {debugResult ? (
-          <Text style={styles.debugResult}>{debugResult}</Text>
+        {/* 状态消息 */}
+        {statusMessage ? (
+          <Text style={styles.statusMessage}>{statusMessage}</Text>
         ) : null}
 
+        {/* 日程列表标题 */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>
-            {formatDateLabel(selectedDate)}
-          </Text>
-          <Text style={styles.sectionMeta}>
-            {selectedEvents.length} 个日程
-          </Text>
+          <Text style={styles.sectionTitle}>{formatDateLabel(selectedDate)}</Text>
+          <Text style={styles.sectionMeta}>{selectedEvents.length} 个日程</Text>
         </View>
 
-        {storageError ? (
-          <Text style={[styles.debugResult, {color: '#e03131'}]}>{storageError}</Text>
-        ) : null}
-
-        <ScrollView
-          style={styles.eventList}
-          contentContainerStyle={styles.eventListContent}
-        >
+        {/* 日程列表 */}
+        <ScrollView style={styles.eventList} contentContainerStyle={styles.eventListContent}>
           {selectedEvents.length === 0 ? (
             <View style={styles.emptyState}>
+              <Text style={styles.emptyEmoji}>📅</Text>
               <Text style={styles.emptyTitle}>暂无日程</Text>
               <Text style={styles.emptyText}>
-                使用上方输入框添加，或按住麦克风语音添加
+                按住下方麦克风语音添加{'\n'}或输入文字指令
               </Text>
             </View>
           ) : (
-            selectedEvents.map((event) => (
-              <View key={event.id} style={styles.eventCard}>
-                <View style={styles.eventAccent} />
+            selectedEvents.map(event => (
+              <Pressable
+                key={event.id}
+                style={styles.eventCard}
+                onLongPress={() => handleEventLongPress(event)}
+              >
+                <View style={[styles.eventAccent, { backgroundColor: getTimeColor(event.time) }]} />
                 <View style={styles.eventBody}>
                   {event.time ? (
                     <Text style={styles.eventTime}>{event.time}</Text>
-                  ) : null}
+                  ) : (
+                    <Text style={[styles.eventTime, { color: '#a29bfe' }]}>全天</Text>
+                  )}
                   <Text style={styles.eventTitle}>{event.title}</Text>
                   {event.note ? (
                     <Text style={styles.eventNote}>{event.note}</Text>
                   ) : null}
                 </View>
-              </View>
+                <Pressable
+                  style={styles.deleteButton}
+                  onPress={() => handleEventLongPress(event)}
+                  hitSlop={8}
+                >
+                  <Text style={styles.deleteButtonText}>✕</Text>
+                </Pressable>
+              </Pressable>
             ))
           )}
         </ScrollView>
 
-        <Pressable
-          style={[
-            styles.voiceButton,
-            voiceState === 'recording' && styles.voiceButtonActive,
-            voiceState === 'processing' && styles.voiceButtonProcessing,
-          ]}
-          onPressIn={handleVoiceStart}
-          onPressOut={handleVoiceStop}
-          disabled={voiceState === 'processing'}
+        {/* 语音按钮 */}
+        <Animated.View style={[styles.voiceButtonOuter, { transform: [{ scale: pulseAnim }] }]}>
+          <Pressable
+            style={[
+              styles.voiceButton,
+              voiceState === 'recording' && styles.voiceButtonRecording,
+              voiceState === 'processing' && styles.voiceButtonProcessing,
+            ]}
+            onPressIn={handleVoiceStart}
+            onPressOut={handleVoiceStop}
+            disabled={voiceState === 'processing'}
+          >
+            <Text style={styles.voiceButtonIcon}>
+              {voiceState === 'recording' ? '●' : voiceState === 'processing' ? '···' : '🎙️'}
+            </Text>
+            <Text style={styles.voiceButtonText}>
+              {voiceState === 'recording'
+                ? '松开结束'
+                : voiceState === 'processing'
+                  ? '处理中'
+                  : '按住说话'}
+            </Text>
+          </Pressable>
+        </Animated.View>
+
+        {/* 删除候选弹窗 */}
+        <Modal
+          visible={showDeleteModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowDeleteModal(false)}
         >
-          <Text style={styles.voiceButtonIcon}>
-            {voiceState === 'recording'
-              ? '●'
-              : voiceState === 'processing'
-                ? '···'
-                : 'MIC'}
-          </Text>
-          <Text style={styles.voiceButtonText}>
-            {voiceState === 'recording'
-              ? '松开结束'
-              : voiceState === 'processing'
-                ? '处理中'
-                : '按住说话'}
-          </Text>
-        </Pressable>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>选择要删除的日程</Text>
+              <Text style={styles.modalSubtitle}>
+                找到 {deleteCandidates.length} 个匹配日程
+              </Text>
+              <ScrollView style={styles.modalList}>
+                {deleteCandidates.map(event => (
+                  <Pressable
+                    key={event.id}
+                    style={styles.modalItem}
+                    onPress={() => handleDeleteFromModal(event)}
+                  >
+                    <View style={styles.modalItemInfo}>
+                      <Text style={styles.modalItemTime}>
+                        {event.time || '全天'}
+                      </Text>
+                      <Text style={styles.modalItemTitle}>{event.title}</Text>
+                    </View>
+                    <Text style={styles.modalItemDelete}>删除</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              <Pressable
+                style={styles.modalCancel}
+                onPress={() => setShowDeleteModal(false)}
+              >
+                <Text style={styles.modalCancelText}>取消</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
       </View>
     </SafeAreaView>
   );
 }
 
+// ==================== 工具函数 ====================
+
 function formatDateLabel(dateString: string) {
-  const date = new Date(dateString + 'T00:00:00');
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-  const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()];
-  return month + '月' + day + '日 ' + weekday;
+  const d = new Date(dateString + 'T00:00:00');
+  const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()];
+  return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + weekday;
 }
+
+/** 根据时间段返回不同的强调色 */
+function getTimeColor(time: string | null) {
+  if (!time) return '#a29bfe';
+  const hour = parseInt(time.split(':')[0], 10);
+  if (hour < 12) return '#74b9ff';   // 上午：蓝
+  if (hour < 18) return '#6C5CE7';   // 下午：紫
+  return '#e17055';                   // 晚上：橙
+}
+
+// ==================== 样式 ====================
 
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#f5f7fb',
+    backgroundColor: '#FAFAFA',
   },
   container: {
     flex: 1,
     paddingHorizontal: 16,
     paddingBottom: 20,
   },
+
+  // --- 标题栏 ---
   header: {
-    alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingBottom: 14,
+    alignItems: 'center',
     paddingTop: 10,
+    paddingBottom: 14,
   },
   title: {
-    color: '#101828',
-    fontSize: 24,
-    fontWeight: '700',
+    color: '#2D3436',
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: 1,
   },
   subtitle: {
-    color: '#667085',
+    color: '#636E72',
     fontSize: 13,
     marginTop: 2,
   },
-  statusBadge: {
-    backgroundColor: '#e6f4ff',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+  todayBadge: {
+    backgroundColor: '#6C5CE7',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
   },
-  statusText: {
-    color: '#1677ff',
+  todayBadgeText: {
+    color: '#ffffff',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
   },
+
+  // --- 日历 ---
   calendarPanel: {
     backgroundColor: '#ffffff',
-    borderColor: '#eaecf0',
-    borderRadius: 8,
+    borderRadius: 16,
     borderWidth: 1,
+    borderColor: '#eaecf0',
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
   },
-  debugPanel: {
-    alignItems: 'center',
+
+  // --- 文本输入 ---
+  inputRow: {
     flexDirection: 'row',
     gap: 8,
     marginTop: 12,
   },
-  debugInput: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d0d5dd',
-    borderRadius: 8,
-    borderWidth: 1,
-    color: '#101828',
+  textInput: {
     flex: 1,
-    fontSize: 14,
-    height: 42,
-    paddingHorizontal: 12,
-  },
-  debugButton: {
-    alignItems: 'center',
-    backgroundColor: '#1677ff',
-    borderRadius: 8,
-    height: 42,
-    justifyContent: 'center',
+    height: 44,
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#d0d5dd',
     paddingHorizontal: 14,
+    fontSize: 14,
+    color: '#2D3436',
   },
-  debugButtonText: {
+  sendButton: {
+    backgroundColor: '#6C5CE7',
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sendButtonText: {
     color: '#ffffff',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  debugResult: {
+
+  // --- 状态消息 ---
+  statusMessage: {
     color: '#475467',
     fontSize: 13,
-    lineHeight: 19,
+    lineHeight: 20,
     marginTop: 8,
+    paddingHorizontal: 4,
   },
+
+  // --- 日程列表 ---
   sectionHeader: {
-    alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingBottom: 10,
+    alignItems: 'center',
     paddingTop: 18,
+    paddingBottom: 10,
   },
   sectionTitle: {
-    color: '#101828',
+    color: '#2D3436',
     fontSize: 17,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   sectionMeta: {
-    color: '#667085',
+    color: '#636E72',
     fontSize: 13,
   },
   eventList: {
     flex: 1,
   },
   eventListContent: {
-    paddingBottom: 96,
+    paddingBottom: 100,
   },
+
+  // --- 空状态 ---
   emptyState: {
     alignItems: 'center',
     backgroundColor: '#ffffff',
-    borderColor: '#eaecf0',
-    borderRadius: 8,
+    borderRadius: 16,
     borderWidth: 1,
-    paddingHorizontal: 20,
-    paddingVertical: 28,
+    borderColor: '#eaecf0',
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+  },
+  emptyEmoji: {
+    fontSize: 40,
+    marginBottom: 12,
   },
   emptyTitle: {
-    color: '#101828',
-    fontSize: 16,
-    fontWeight: '600',
+    color: '#2D3436',
+    fontSize: 17,
+    fontWeight: '700',
   },
   emptyText: {
-    color: '#667085',
+    color: '#636E72',
     fontSize: 14,
-    lineHeight: 21,
+    lineHeight: 22,
     marginTop: 8,
     textAlign: 'center',
   },
+
+  // --- 事件卡片 ---
   eventCard: {
     backgroundColor: '#ffffff',
-    borderColor: '#eaecf0',
-    borderRadius: 8,
+    borderRadius: 14,
     borderWidth: 1,
+    borderColor: '#eaecf0',
     flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 10,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 2,
   },
   eventAccent: {
-    backgroundColor: '#1677ff',
     width: 4,
+    alignSelf: 'stretch',
   },
   eventBody: {
     flex: 1,
@@ -439,48 +685,147 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   eventTime: {
-    color: '#1677ff',
+    color: '#6C5CE7',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   eventTitle: {
-    color: '#101828',
+    color: '#2D3436',
     fontSize: 16,
     fontWeight: '600',
-    marginTop: 4,
+    marginTop: 3,
   },
   eventNote: {
-    color: '#667085',
+    color: '#636E72',
     fontSize: 13,
     lineHeight: 19,
-    marginTop: 5,
+    marginTop: 4,
+  },
+  deleteButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteButtonText: {
+    color: '#b2bec3',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  // --- 语音按钮 ---
+  voiceButtonOuter: {
+    position: 'absolute',
+    bottom: 24,
+    alignSelf: 'center',
   },
   voiceButton: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: '#1677ff',
-    borderRadius: 32,
-    bottom: 24,
-    height: 64,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#6C5CE7',
     justifyContent: 'center',
-    position: 'absolute',
-    width: 64,
+    alignItems: 'center',
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    elevation: 8,
   },
   voiceButtonIcon: {
     color: '#ffffff',
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 20,
   },
   voiceButtonText: {
     color: '#ffffff',
     fontSize: 10,
     marginTop: 2,
+    fontWeight: '600',
   },
-  voiceButtonActive: {
-    backgroundColor: '#e03131',
-    transform: [{scale: 1.1}],
+  voiceButtonRecording: {
+    backgroundColor: '#E17055',
   },
   voiceButtonProcessing: {
-    backgroundColor: '#868e96',
+    backgroundColor: '#636E72',
+  },
+
+  // --- 删除确认弹窗 ---
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 30,
+  },
+  modalContent: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    paddingTop: 24,
+    paddingBottom: 16,
+    paddingHorizontal: 20,
+    width: '100%',
+    maxHeight: '70%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 30,
+    elevation: 10,
+  },
+  modalTitle: {
+    color: '#2D3436',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    color: '#636E72',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 6,
+    marginBottom: 16,
+  },
+  modalList: {
+    maxHeight: 300,
+  },
+  modalItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  modalItemInfo: {
+    flex: 1,
+  },
+  modalItemTime: {
+    color: '#6C5CE7',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  modalItemTitle: {
+    color: '#2D3436',
+    fontSize: 15,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  modalItemDelete: {
+    color: '#E17055',
+    fontSize: 14,
+    fontWeight: '700',
+    paddingLeft: 16,
+  },
+  modalCancel: {
+    marginTop: 16,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#f5f5f5',
+  },
+  modalCancelText: {
+    color: '#636E72',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });
