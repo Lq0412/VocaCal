@@ -1,7 +1,10 @@
 import base64
+import io
+import struct
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 from models.schemas import NLUParseRequest, NLUResult, VoiceProcessResponse
 from services import nlu, xf_asr, xf_tts
@@ -37,8 +40,15 @@ async def voice_process(audio: UploadFile = File(...)):
 
     # 1. ASR 语音识别
     try:
-        text = await xf_asr.recognize(audio_bytes)
-    except Exception as e:
+        pcm = _audio_to_pcm(audio_bytes)
+        text = await xf_asr.recognize(pcm)
+    except ValueError as e:
+        return VoiceProcessResponse(
+            text="",
+            reply_text=str(e),
+            reply_audio="",
+        )
+    except Exception:
         return VoiceProcessResponse(
             text="",
             reply_text="语音识别失败，请重试",
@@ -108,3 +118,62 @@ def _build_reply(result: NLUResult) -> str:
         return "查询日程"
 
     return "抱歉没理解，试试说：明天下午三点开会"
+
+
+def _audio_to_pcm(audio_bytes: bytes) -> bytes:
+    """将上传音频转为 PCM 16kHz 16bit mono。WAV 直接跳过 44 字节头，其他格式用 pydub 转换。"""
+    if audio_bytes[:4] == b"RIFF":
+        return audio_bytes[44:]
+
+    try:
+        from pydub import AudioSegment
+
+        audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
+        audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
+        return audio.raw_data
+    except ImportError:
+        raise ValueError("非 WAV 格式，需安装 pydub: pip install pydub（并确保系统有 ffmpeg）")
+    except Exception as e:
+        raise ValueError(f"音频转换失败: {e}")
+
+
+def _wrap_wav_header(
+    pcm: bytes,
+    sample_rate: int = 16000,
+    bits: int = 16,
+    channels: int = 1,
+) -> bytes:
+    """将裸 PCM 包装为带 WAV 头的字节流，供播放器直接播放。"""
+    data_size = len(pcm)
+    buf = io.BytesIO()
+    buf.write(b"RIFF")
+    buf.write(struct.pack("<I", 36 + data_size))
+    buf.write(b"WAVE")
+    buf.write(b"fmt ")
+    buf.write(
+        struct.pack(
+            "<IHHIIHH",
+            16,
+            1,
+            channels,
+            sample_rate,
+            sample_rate * channels * bits // 8,
+            channels * bits // 8,
+            bits,
+        )
+    )
+    buf.write(b"data")
+    buf.write(struct.pack("<I", data_size))
+    buf.write(pcm)
+    return buf.getvalue()
+
+
+@app.get("/api/tts/speak")
+async def tts_speak(text: str = Query(...)):
+    """TTS 播放端点，返回 WAV 音频流供前端直接播放。"""
+    try:
+        pcm = await xf_tts.synthesize(text)
+        wav = _wrap_wav_header(pcm)
+        return Response(content=wav, media_type="audio/wav")
+    except Exception:
+        return Response(status_code=500)
