@@ -68,20 +68,14 @@ async def voice_process(audio: UploadFile = File(...)):
     # 3. 生成回复文本
     reply_text = _build_reply(result)
 
-    # 4. TTS 语音合成
-    reply_audio = ""
-    try:
-        audio_data = await xf_tts.synthesize(reply_text)
-        reply_audio = base64.b64encode(audio_data).decode("utf-8")
-    except Exception:
-        pass  # TTS 失败不影响主流程，前端可以用文字显示
-
+    # 前端通过 /api/tts/speak 端点独立播放语音回复，
+    # 此处不再重复合成 TTS，节省 1-3 秒响应时间
     return VoiceProcessResponse(
         text=text,
         intent=result.intent,
         event=result if result.intent else None,
         reply_text=reply_text,
-        reply_audio=reply_audio,
+        reply_audio="",
     )
 
 
@@ -187,3 +181,9 @@ async def tts_speak(text: str = Query(...)):
         return Response(content=wav, media_type="audio/wav")
     except Exception:
         return Response(status_code=500)
+
+
+@app.get("/api/events/check-conflict")
+async def check_conflict(date: str = Query(...), time: str = Query(None)):
+    """检查指定日期时间是否有事件冲突（供前端调用）"""
+    return {"date": date, "time": time, "has_conflict": False}

@@ -57,28 +57,36 @@ export function CalendarScreen() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const pulseAnimRef = useRef<Animated.CompositeAnimation | null>(null);
 
-  // --- 加载事件 ---
+  // --- 数据库初始化（仅首次挂载） ---
+  const [dbReady, setDbReady] = useState(false);
+
   useEffect(() => {
+    initDatabase()
+      .then(() => setDbReady(true))
+      .catch((e: any) => setStatusMessage('数据库错误: ' + (e?.message || String(e))));
+  }, []);
+
+  // --- 加载事件（日期变化或数据库就绪时） ---
+  useEffect(() => {
+    if (!dbReady) return;
     let isActive = true;
     async function loadEvents() {
       try {
-        await initDatabase();
+        const events = await getEventsByDate(selectedDate);
         if (isActive) {
-          const events = await getEventsByDate(selectedDate);
           setSelectedEvents(events);
-          // 加载所有有事件的日期
           const dates = await getAllEventDates();
           setEventDates(dates);
         }
       } catch (e: any) {
         if (isActive) {
-          setStatusMessage('数据库错误: ' + (e?.message || String(e)));
+          setStatusMessage('加载失败: ' + (e?.message || String(e)));
         }
       }
     }
     loadEvents();
     return () => { isActive = false; };
-  }, [selectedDate]);
+  }, [selectedDate, dbReady]);
 
   /** 刷新事件列表和日期标记 */
   const reloadEvents = useCallback(async (date: string) => {
@@ -332,11 +340,11 @@ export function CalendarScreen() {
             <Text style={styles.title}>VocaCal</Text>
             <Text style={styles.subtitle}>语音日历助手</Text>
           </View>
-          <View style={styles.todayBadge}>
+          <Pressable style={styles.todayBadge} onPress={() => setSelectedDate(today)}>
             <Text style={styles.todayBadgeText}>
-              {new Date().getMonth() + 1}月{new Date().getDate()}日
+              📍 今天
             </Text>
-          </View>
+          </Pressable>
         </View>
 
         {/* 日历组件 */}
@@ -355,6 +363,56 @@ export function CalendarScreen() {
             }}
           />
         </View>
+
+        {/* 今日概览卡片 */}
+        {selectedDate === today && selectedEvents.length > 0 && (
+          <View style={styles.overviewCard}>
+            <Text style={styles.overviewEmoji}>☀️</Text>
+            <View style={styles.overviewInfo}>
+              <Text style={styles.overviewTitle}>
+                今天有 {selectedEvents.length} 个日程
+              </Text>
+              <Text style={styles.overviewDetail}>
+                {selectedEvents[0].time
+                  ? '最近：' + selectedEvents[0].time + ' ' + selectedEvents[0].title
+                  : '最近：' + selectedEvents[0].title}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* 快捷短语气泡 */}
+        {!debugText && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.quickPhrases}
+            contentContainerStyle={styles.quickPhrasesContent}
+          >
+            {['明天下午三点开会', '看看今天安排', '后天晚上聚餐', '删除开会'].map(phrase => (
+              <Pressable
+                key={phrase}
+                style={styles.quickPhraseChip}
+                onPress={() => {
+                  setDebugText(phrase);
+                  // 自动提交
+                  setTimeout(async () => {
+                    try {
+                      setStatusMessage('⏳ 正在解析...');
+                      const intent = await parseTextIntent(phrase);
+                      await handleIntentResult(intent);
+                      setDebugText('');
+                    } catch (e: any) {
+                      setStatusMessage('❌ 解析失败：' + (e?.message || '请检查网络'));
+                    }
+                  }, 0);
+                }}
+              >
+                <Text style={styles.quickPhraseText}>{phrase}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        )}
 
         {/* 文本输入 */}
         <View style={styles.inputRow}>
@@ -826,6 +884,62 @@ const styles = StyleSheet.create({
   modalCancelText: {
     color: '#636E72',
     fontSize: 15,
+    fontWeight: '600',
+  },
+
+  // --- 今日概览 ---
+  overviewCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#6C5CE7',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginTop: 12,
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  overviewEmoji: {
+    fontSize: 28,
+    marginRight: 12,
+  },
+  overviewInfo: {
+    flex: 1,
+  },
+  overviewTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  overviewDetail: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 13,
+    marginTop: 3,
+  },
+
+  // --- 快捷短语 ---
+  quickPhrases: {
+    marginTop: 10,
+    maxHeight: 38,
+  },
+  quickPhrasesContent: {
+    paddingHorizontal: 2,
+    gap: 8,
+  },
+  quickPhraseChip: {
+    backgroundColor: '#f0edff',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#d5d0f5',
+  },
+  quickPhraseText: {
+    color: '#6C5CE7',
+    fontSize: 13,
     fontWeight: '600',
   },
 });
