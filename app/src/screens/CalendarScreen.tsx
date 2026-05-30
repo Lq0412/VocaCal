@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -9,9 +9,16 @@ import {
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { parseTextIntent } from '../services/apiService';
+import { parseTextIntent, processVoice, API_BASE_URL } from '../services/apiService';
 import { applyIntent } from '../services/calendarIntentService';
 import { getEventsByDate, initDatabase } from '../services/storageService';
+import {
+  playFromUrl,
+  requestRecordPermission,
+  startRecording,
+  stopRecording,
+} from '../services/voiceService';
+import type { VoiceState } from '../services/voiceService';
 import type { CalendarEvent } from '../types/event';
 
 const today = new Date().toISOString().slice(0, 10);
@@ -22,6 +29,7 @@ export function CalendarScreen() {
   const [debugText, setDebugText] = useState('');
   const [debugResult, setDebugResult] = useState('');
   const [storageError, setStorageError] = useState('');
+  const [voiceState, setVoiceState] = useState<VoiceState>('idle');
 
   useEffect(() => {
     let isActive = true;
@@ -35,9 +43,9 @@ export function CalendarScreen() {
           setSelectedEvents(events);
           setStorageError('');
         }
-      } catch {
+      } catch (e: any) {
         if (isActive) {
-          setStorageError('日程加载失败，请稍后重试');
+          setStorageError('数据库错误: ' + (e?.message || String(e)));
           setSelectedEvents([]);
         }
       }
@@ -65,13 +73,16 @@ export function CalendarScreen() {
     }
 
     try {
+      setDebugResult('正在解析...');
       const intent = await parseTextIntent(text);
+      setDebugResult('NLU结果: intent=' + intent.intent + ' title=' + intent.title + ' date=' + intent.date + ' time=' + intent.time);
+
       const result = await applyIntent(intent);
 
       if (result.type === 'added') {
         setSelectedDate(result.event.date);
         await reloadEvents(result.event.date);
-        setDebugResult(`已添加：${result.event.title}`);
+        setDebugResult('已添加：' + result.event.title);
         setDebugText('');
         return;
       }
@@ -79,65 +90,109 @@ export function CalendarScreen() {
       if (result.type === 'query') {
         setSelectedDate(result.date);
         setSelectedEvents(result.events);
-        setDebugResult(`查询到 ${result.events.length} 个日程`);
+        setDebugResult('查询到 ' + result.events.length + ' 个日程');
         return;
       }
 
       if (result.type === 'delete_candidates') {
-        setDebugResult(`找到 ${result.events.length} 个待删除日程`);
+        setDebugResult('找到 ' + result.events.length + ' 个待删除日程');
         return;
       }
 
       setDebugResult(result.message);
-    } catch {
-      setDebugResult('文本解析失败，请确认后端已启动');
+    } catch (e: any) {
+      setDebugResult('错误: ' + (e?.message || String(e)));
     }
   }
 
-  const markedDates = useMemo(
-    () => ({
-      [today]: {
-        marked: true,
-        dotColor: '#1677ff',
-      },
-      [selectedDate]: {
-        selected: true,
-        selectedColor: '#1677ff',
-        selectedTextColor: '#ffffff',
-      },
-    }),
-    [selectedDate],
-  );
+  async function handleVoiceStart() {
+    if (voiceState !== 'idle') {
+      return;
+    }
+
+    const granted = await requestRecordPermission();
+    if (!granted) {
+      setDebugResult('需要录音权限才能使用语音功能');
+      return;
+    }
+
+    try {
+      await startRecording();
+      setVoiceState('recording');
+    } catch (e: any) {
+      if (e?.message === 'VOICE_NOT_AVAILABLE') {
+        setDebugResult('语音录音暂不可用，请使用文本输入调试');
+      } else {
+        setDebugResult('录音启动失败');
+      }
+    }
+  }
+
+  async function handleVoiceStop() {
+    if (voiceState !== 'recording') {
+      return;
+    }
+
+    setVoiceState('processing');
+
+    try {
+      const path = await stopRecording();
+      const result = await processVoice(path);
+
+      setDebugResult(result.text ? '识别：' + result.text : '未识别到语音');
+
+      if (result.event?.intent) {
+        const applyResult = await applyIntent(result.event);
+
+        if (applyResult.type === 'added') {
+          setSelectedDate(applyResult.event.date);
+          await reloadEvents(applyResult.event.date);
+          setDebugResult('已添加：' + applyResult.event.title);
+        } else if (applyResult.type === 'query') {
+          setSelectedDate(applyResult.date);
+          setSelectedEvents(applyResult.events);
+          setDebugResult('查询到 ' + applyResult.events.length + ' 个日程');
+        } else if (applyResult.type === 'delete_candidates') {
+          setDebugResult('找到 ' + applyResult.events.length + ' 个待删除日程');
+        } else {
+          setDebugResult(applyResult.message);
+        }
+      } else if (result.reply_text) {
+        setDebugResult(result.reply_text);
+      }
+
+      if (result.reply_text) {
+        const ttsUrl = API_BASE_URL + '/api/tts/speak?text=' + encodeURIComponent(result.reply_text);
+        playFromUrl(ttsUrl);
+      }
+    } catch (e: any) {
+      setDebugResult('语音错误: ' + (e?.message || String(e)));
+    }
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.title} testID="app-title">VocaCal</Text>
+            <Text style={styles.title}>VocaCal</Text>
             <Text style={styles.subtitle}>语音日历助手</Text>
           </View>
           <View style={styles.statusBadge}>
-            <Text style={styles.statusText}>MVP</Text>
+            <Text style={styles.statusText}>调试模式</Text>
           </View>
         </View>
 
         <View style={styles.calendarPanel}>
           <Calendar
-            current={selectedDate}
-            markedDates={markedDates}
-            onDayPress={day => setSelectedDate(day.dateString)}
+            onDayPress={(day: any) => setSelectedDate(day.dateString)}
+            markedDates={{
+              [selectedDate]: {selected: true, selectedColor: '#1677ff'},
+            }}
             theme={{
-              backgroundColor: '#ffffff',
-              calendarBackground: '#ffffff',
-              textSectionTitleColor: '#667085',
               todayTextColor: '#1677ff',
+              selectedDayBackgroundColor: '#1677ff',
               arrowColor: '#1677ff',
-              monthTextColor: '#101828',
-              textMonthFontWeight: '600',
-              textDayFontSize: 15,
-              textMonthFontSize: 17,
-              textDayHeaderFontSize: 13,
             }}
           />
         </View>
@@ -147,51 +202,86 @@ export function CalendarScreen() {
             style={styles.debugInput}
             value={debugText}
             onChangeText={setDebugText}
-            placeholder="输入语音文本调试"
+            placeholder="输入指令调试，如：明天下午三点开会"
             placeholderTextColor="#98a2b3"
+            onSubmitEditing={handleDebugSubmit}
+            returnKeyType="send"
           />
           <Pressable style={styles.debugButton} onPress={handleDebugSubmit}>
-            <Text style={styles.debugButtonText}>解析文本</Text>
+            <Text style={styles.debugButtonText}>发送</Text>
           </Pressable>
         </View>
-        {debugResult ? <Text style={styles.debugResult}>{debugResult}</Text> : null}
+
+        {debugResult ? (
+          <Text style={styles.debugResult}>{debugResult}</Text>
+        ) : null}
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>{formatDateLabel(selectedDate)}</Text>
-          <Text style={styles.sectionMeta}>{selectedEvents.length} 个日程</Text>
+          <Text style={styles.sectionTitle}>
+            {formatDateLabel(selectedDate)}
+          </Text>
+          <Text style={styles.sectionMeta}>
+            {selectedEvents.length} 个日程
+          </Text>
         </View>
+
+        {storageError ? (
+          <Text style={[styles.debugResult, {color: '#e03131'}]}>{storageError}</Text>
+        ) : null}
 
         <ScrollView
           style={styles.eventList}
           contentContainerStyle={styles.eventListContent}
-          showsVerticalScrollIndicator={false}
         >
-          {storageError ? (
+          {selectedEvents.length === 0 ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>{storageError}</Text>
-            </View>
-          ) : selectedEvents.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle} testID="empty-events-title">暂无日程</Text>
-              <Text style={styles.emptyText}>按住下方按钮，说出“明天下午三点开会”。</Text>
+              <Text style={styles.emptyTitle}>暂无日程</Text>
+              <Text style={styles.emptyText}>
+                使用上方输入框添加，或按住麦克风语音添加
+              </Text>
             </View>
           ) : (
-            selectedEvents.map(event => (
+            selectedEvents.map((event) => (
               <View key={event.id} style={styles.eventCard}>
                 <View style={styles.eventAccent} />
                 <View style={styles.eventBody}>
-                  <Text style={styles.eventTime}>{event.time ?? '全天'}</Text>
+                  {event.time ? (
+                    <Text style={styles.eventTime}>{event.time}</Text>
+                  ) : null}
                   <Text style={styles.eventTitle}>{event.title}</Text>
-                  {event.note ? <Text style={styles.eventNote}>{event.note}</Text> : null}
+                  {event.note ? (
+                    <Text style={styles.eventNote}>{event.note}</Text>
+                  ) : null}
                 </View>
               </View>
             ))
           )}
         </ScrollView>
 
-        <Pressable style={styles.voiceButton}>
-          <Text style={styles.voiceButtonIcon}>MIC</Text>
-          <Text style={styles.voiceButtonText}>按住说话</Text>
+        <Pressable
+          style={[
+            styles.voiceButton,
+            voiceState === 'recording' && styles.voiceButtonActive,
+            voiceState === 'processing' && styles.voiceButtonProcessing,
+          ]}
+          onPressIn={handleVoiceStart}
+          onPressOut={handleVoiceStop}
+          disabled={voiceState === 'processing'}
+        >
+          <Text style={styles.voiceButtonIcon}>
+            {voiceState === 'recording'
+              ? '●'
+              : voiceState === 'processing'
+                ? '···'
+                : 'MIC'}
+          </Text>
+          <Text style={styles.voiceButtonText}>
+            {voiceState === 'recording'
+              ? '松开结束'
+              : voiceState === 'processing'
+                ? '处理中'
+                : '按住说话'}
+          </Text>
         </Pressable>
       </View>
     </SafeAreaView>
@@ -199,11 +289,11 @@ export function CalendarScreen() {
 }
 
 function formatDateLabel(dateString: string) {
-  const date = new Date(`${dateString}T00:00:00`);
+  const date = new Date(dateString + 'T00:00:00');
   const month = date.getMonth() + 1;
   const day = date.getDate();
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()];
-  return `${month}月${day}日 ${weekday}`;
+  return month + '月' + day + '日 ' + weekday;
 }
 
 const styles = StyleSheet.create({
@@ -385,5 +475,12 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 10,
     marginTop: 2,
+  },
+  voiceButtonActive: {
+    backgroundColor: '#e03131',
+    transform: [{scale: 1.1}],
+  },
+  voiceButtonProcessing: {
+    backgroundColor: '#868e96',
   },
 });
