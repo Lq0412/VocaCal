@@ -122,6 +122,21 @@ export async function deleteEvent(id: number): Promise<void> {
   await executeSql('DELETE FROM events WHERE id = ?', [id]);
 }
 
+/**
+ * 获取所有有事件的日期列表（用于日历标记小圆点）
+ */
+export async function getAllEventDates(): Promise<string[]> {
+  const result = await executeSql(
+    'SELECT DISTINCT date FROM events ORDER BY date',
+  );
+
+  const dates: string[] = [];
+  for (let i = 0; i < result.rows.length; i += 1) {
+    dates.push(result.rows.item(i).date);
+  }
+  return dates;
+}
+
 function rowsToEvents(result: ResultSet): CalendarEvent[] {
   const events: CalendarEvent[] = [];
 
