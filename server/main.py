@@ -81,8 +81,8 @@ async def voice_process(audio: UploadFile = File(...)):
 
 def _build_reply(result: NLUResult) -> str:
     """根据意图生成回复文本，优先使用 NLU 生成的自然语言回复"""
-    # 优先使用 DeepSeek 生成的友好回复
-    if result.reply:
+    # 优先使用 DeepSeek 生成的友好回复（防护：超过 60 字视为异常，丢弃）
+    if result.reply and len(result.reply) <= 60:
         return result.reply
 
     if not result.intent:

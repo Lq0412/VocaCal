@@ -43,7 +43,7 @@ def _build_auth_url() -> str:
     return f"{_ENDPOINT}?{params}"
 
 
-async def synthesize(text: str, vcn: str = "xiaoyan") -> bytes:
+async def synthesize(text: str, vcn: str = "x4_yezi") -> bytes:
     """
     将文字发送到讯飞 TTS，返回 PCM 音频 bytes。
     vcn: 发音人，默认 xiaoyan（需在控制台开通）
@@ -54,13 +54,16 @@ async def synthesize(text: str, vcn: str = "xiaoyan") -> bytes:
     ssl_context.verify_mode = ssl.CERT_NONE
 
     # 一次性发送请求
+    # tte=Unicode: 确保中文 UTF-8 文本能被正确合成
     request = json.dumps({
         "common": {"app_id": settings.xf_app_id},
         "business": {
             "aue": "raw",
             "auf": "audio/L16;rate=16000",
             "vcn": vcn,
+            "tte": "UTF8",
             "speed": 50,
+            "volume": 100,
             "pitch": 50,
         },
         "data": {
