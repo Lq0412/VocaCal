@@ -30,8 +30,8 @@ export async function processVoice(
   // @ts-expect-error React Native FormData supports object for file upload
   formData.append('audio', {
     uri,
-    type: 'audio/m4a',
-    name: 'audio.m4a',
+    type: 'audio/wav',
+    name: 'audio.wav',
   });
 
   const response = await axios.post<VoiceProcessResponse>(
