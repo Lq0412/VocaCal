@@ -31,6 +31,7 @@ import {
   getAllEventDates,
   getEventsByDate,
   initDatabase,
+  updateEvent,
 } from '../services/storageService';
 import {
   playFromUrl,
@@ -186,6 +187,37 @@ export function CalendarScreen() {
       // 多条 → 弹出自定义选择弹窗
       setDeleteCandidates(result.events);
       setShowDeleteModal(true);
+      return;
+    }
+
+    if (result.type === 'modify_candidates') {
+      if (result.events.length === 0) {
+        setStatusMessage('❌ 未找到要修改的日程');
+        return;
+      }
+      const event = result.events[0];
+      const updates: { title?: string; date?: string; time?: string } = {};
+      if (result.newTitle) updates.title = result.newTitle;
+      if (result.newDate) updates.date = result.newDate;
+      if (result.newTime) updates.time = result.newTime;
+
+      Alert.alert(
+        '确认修改',
+        '修改「' + event.title + '」？',
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '确认',
+            onPress: async () => {
+              await updateEvent(event.id, updates);
+              const targetDate = result.newDate || selectedDate;
+              setSelectedDate(targetDate);
+              await reloadEvents(targetDate);
+              setStatusMessage('✏️ 已修改：' + (result.newTitle || event.title));
+            },
+          },
+        ],
+      );
       return;
     }
 

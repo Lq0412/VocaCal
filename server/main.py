@@ -86,7 +86,11 @@ async def voice_process(audio: UploadFile = File(...)):
 
 
 def _build_reply(result: NLUResult) -> str:
-    """根据意图生成回复文本"""
+    """根据意图生成回复文本，优先使用 NLU 生成的自然语言回复"""
+    # 优先使用 DeepSeek 生成的友好回复
+    if result.reply:
+        return result.reply
+
     if not result.intent:
         return "抱歉没理解，试试说：明天下午三点开会"
 
@@ -116,6 +120,12 @@ def _build_reply(result: NLUResult) -> str:
         if result.date:
             return f"查询{result.date}的日程"
         return "查询日程"
+
+    if result.intent == "MODIFY_EVENT":
+        parts = ["需要修改"]
+        if result.title:
+            parts.append(f"「{result.title}」")
+        return "".join(parts)
 
     return "抱歉没理解，试试说：明天下午三点开会"
 
