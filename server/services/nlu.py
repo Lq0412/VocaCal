@@ -57,6 +57,9 @@ _SYSTEM_PROMPT = """你是一个日历事件解析助手。根据用户的语音
 _WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
 
+_http_client = httpx.AsyncClient(timeout=15)
+
+
 def _extract_json(text: str) -> dict:
     """从模型输出中提取 JSON，兼容 markdown 代码块包裹"""
     match = re.search(r"`(?:json)?\s*(\{.*?\})\s*`", text, re.DOTALL)
@@ -77,22 +80,22 @@ async def parse_intent(text: str) -> NLUResult:
 
     try:
         t0 = time.monotonic()
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                f"{settings.deepseek_base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
-                json={
-                    "model": "deepseek-v4flash",
-                    "temperature": 0.1,
-                    "messages": [
-                        {"role": "system", "content": prompt},
-                        {"role": "user", "content": text},
-                    ],
-                },
-            )
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"]
-            logger.info(f"DeepSeek response ({time.monotonic()-t0:.1f}s): {content!r}")
+        resp = await _http_client.post(
+            f"{settings.deepseek_base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
+            json={
+                "model": "deepseek-v4flash",  # 注意：如果官方是 deepseek-chat，建议后续修改
+                "temperature": 0.1,
+                "response_format": {"type": "json_object"},
+                "messages": [
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": text},
+                ],
+            },
+        )
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"]
+        logger.info(f"DeepSeek response ({time.monotonic()-t0:.1f}s): {content!r}")
 
         parsed = _extract_json(content)
         return NLUResult(
