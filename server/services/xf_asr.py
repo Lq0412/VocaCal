@@ -21,8 +21,8 @@ _PATH = "/v1"
 _ENDPOINT = f"wss://{_HOST}{_PATH}"
 
 # 每帧音频大小和发送间隔
-_FRAME_SIZE = 1280
-_FRAME_INTERVAL = 0.04
+_FRAME_SIZE = 2560
+_FRAME_INTERVAL = 0.01
 
 
 def _build_auth_url() -> str:
