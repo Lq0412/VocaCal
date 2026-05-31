@@ -1,6 +1,8 @@
 import base64
 import io
+import logging
 import struct
+import time
 
 from fastapi import FastAPI, File, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +10,9 @@ from fastapi.responses import Response
 
 from models.schemas import NLUParseRequest, NLUResult, VoiceProcessResponse
 from services import nlu, xf_asr, xf_tts
+
+logger = logging.getLogger("vocacal")
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="VocaCal Backend", version="0.1.0")
 
@@ -34,14 +39,18 @@ async def nlu_parse(req: NLUParseRequest):
 async def voice_process(audio: UploadFile = File(...)):
     """
     完整语音处理管线：
-    音频 → ASR 识别 → NLU 解析 → 生成回复文本 → TTS 合成 → 返回
+    音频 → ASR 识别 → NLU 解析 → 生成回复文本 → 返回
     """
+    t_start = time.monotonic()
     audio_bytes = await audio.read()
+    logger.info(f"[Pipeline] Audio received: {len(audio_bytes)} bytes")
 
     # 1. ASR 语音识别
     try:
+        t0 = time.monotonic()
         pcm = _audio_to_pcm(audio_bytes)
         text = await xf_asr.recognize(pcm)
+        logger.info(f"[Pipeline] ASR done in {time.monotonic()-t0:.1f}s: {text!r}")
     except ValueError as e:
         return VoiceProcessResponse(
             text="",
@@ -63,10 +72,21 @@ async def voice_process(audio: UploadFile = File(...)):
         )
 
     # 2. NLU 意图解析
-    result = await nlu.parse_intent(text)
+    t0 = time.monotonic()
+    try:
+        result = await nlu.parse_intent(text)
+        logger.info(f"[Pipeline] NLU done in {time.monotonic()-t0:.1f}s: intent={result.intent}")
+    except Exception as e:
+        logger.error(f"[Pipeline] NLU Error: {e}")
+        return VoiceProcessResponse(
+            text=text,
+            reply_text="服务器解析失败，请稍后重试",
+            reply_audio="",
+        )
 
     # 3. 生成回复文本
     reply_text = _build_reply(result)
+    logger.info(f"[Pipeline] Total: {time.monotonic()-t_start:.1f}s → {reply_text!r}")
 
     # 前端通过 /api/tts/speak 端点独立播放语音回复，
     # 此处不再重复合成 TTS，节省 1-3 秒响应时间

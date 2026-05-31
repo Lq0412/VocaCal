@@ -46,6 +46,7 @@ import { EmptyState } from '../components/EmptyState';
 import { VoiceButton } from '../components/VoiceButton';
 import { QuickPhrases } from '../components/QuickPhrases';
 import { DeleteModal } from '../components/DeleteModal';
+import { TodayBriefing } from '../components/TodayBriefing';
 import { colors, typography, spacing } from '../styles/theme';
 
 const today = new Date().toISOString().slice(0, 10);
@@ -124,15 +125,19 @@ export function CalendarScreen() {
     date: string | null;
     time: string | null;
     raw: string;
-  }) => {
+  }, originalReply?: string): Promise<string | null> => {
     const result = await applyIntent(intent as any);
 
     if (result.type === 'added') {
       setSelectedDate(result.event.date);
       await reloadEvents(result.event.date);
-      setStatusMessage('已添加：' + result.event.title +
-        (result.event.time ? '（' + result.event.time + '）' : ''));
-      return;
+      
+      let textToSpeak = originalReply || ('已添加：' + result.event.title + (result.event.time ? '（' + result.event.time + '）' : ''));
+      if (result.hasConflict) {
+        textToSpeak = `注意哦，这个时间段你已经有别的安排了。${textToSpeak}`;
+      }
+      setStatusMessage(textToSpeak);
+      return textToSpeak;
     }
 
     if (result.type === 'query') {
@@ -142,11 +147,14 @@ export function CalendarScreen() {
         const summary = result.events
           .map(e => (e.time ? e.time + ' ' : '') + e.title)
           .join('、');
-        setStatusMessage(result.events.length + ' 个日程：' + summary);
+        const msg = result.events.length + ' 个日程：' + summary;
+        setStatusMessage(msg);
+        return originalReply || msg;
       } else {
-        setStatusMessage('该日期暂无日程');
+        const msg = '该日期暂无日程';
+        setStatusMessage(msg);
+        return originalReply || msg;
       }
-      return;
     }
 
     if (result.type === 'delete_candidates') {
@@ -172,11 +180,11 @@ export function CalendarScreen() {
             },
           ],
         );
-        return;
+        return '请确认删除操作';
       }
       setDeleteCandidates(result.events);
       setShowDeleteModal(true);
-      return;
+      return '请在屏幕上选择要删除的日程';
     }
 
     if (result.type === 'modify_candidates') {
@@ -207,10 +215,12 @@ export function CalendarScreen() {
           },
         ],
       );
-      return;
+      return '请确认修改操作';
     }
 
-    setStatusMessage(result.message || '抱歉没理解，试试说：明天下午三点开会');
+    const msg = result.message || '抱歉没理解，试试说：明天下午三点开会';
+    setStatusMessage(msg);
+    return msg;
   }, [selectedDate, reloadEvents]);
 
   /** 删除单个事件（从弹窗中选择） */
@@ -305,15 +315,19 @@ export function CalendarScreen() {
         setStatusMessage('识别：' + result.text);
       }
 
+      let finalReply = result.reply_text;
       if (result.event?.intent) {
-        await handleIntentResult(result.event);
+        const overrideReply = await handleIntentResult(result.event, result.reply_text);
+        if (overrideReply) {
+           finalReply = overrideReply;
+        }
       } else if (result.reply_text) {
         setStatusMessage(result.reply_text);
       }
 
       // TTS 播放语音回复
-      if (result.reply_text) {
-        const ttsUrl = API_BASE_URL + '/api/tts/speak?text=' + encodeURIComponent(result.reply_text);
+      if (finalReply) {
+        const ttsUrl = API_BASE_URL + '/api/tts/speak?text=' + encodeURIComponent(finalReply);
         playFromUrl(ttsUrl);
       }
     } catch (e: any) {
@@ -323,6 +337,17 @@ export function CalendarScreen() {
     }
   }, [voiceState, handleIntentResult]);
 
+  const handleVoiceCancel = useCallback(async () => {
+    if (voiceState !== 'recording') return;
+    try {
+      await stopRecording();
+    } catch {
+      // ignore
+    }
+    setVoiceState('idle');
+    setStatusMessage('已取消录音');
+  }, [voiceState]);
+
   // ==================== 渲染 ====================
 
   return (
@@ -331,8 +356,13 @@ export function CalendarScreen() {
         {/* 标题栏 */}
         <Header onTodayPress={() => setSelectedDate(today)} />
 
-        {/* 日历组件 */}
-        <View style={styles.calendarWrap}>
+        <ScrollView 
+          style={styles.mainScroll} 
+          contentContainerStyle={styles.mainScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* 日历组件 */}
+          <View style={styles.calendarWrap}>
           <Calendar
             onDayPress={(day: any) => setSelectedDate(day.dateString)}
             markedDates={markedDates}
@@ -353,14 +383,9 @@ export function CalendarScreen() {
           />
         </View>
 
-        {/* 今日概览（简单一行文字） */}
-        {selectedDate === today && selectedEvents.length > 0 && (
-          <Text style={styles.overviewText}>
-            今天 {selectedEvents.length} 个日程
-            {selectedEvents[0].time
-              ? '，最近：' + selectedEvents[0].time + ' ' + selectedEvents[0].title
-              : '，最近：' + selectedEvents[0].title}
-          </Text>
+        {/* 智能今日概览 */}
+        {selectedDate === today && (
+          <TodayBriefing events={selectedEvents} />
         )}
 
         {/* 快捷短语 */}
@@ -403,7 +428,7 @@ export function CalendarScreen() {
         </View>
 
         {/* 日程列表 */}
-        <ScrollView style={styles.eventList} contentContainerStyle={styles.eventListInner}>
+        <View style={styles.eventListInner}>
           {selectedEvents.length === 0 ? (
             <EmptyState />
           ) : (
@@ -416,13 +441,15 @@ export function CalendarScreen() {
               />
             ))
           )}
-        </ScrollView>
+        </View>
+      </ScrollView>
 
-        {/* 语音按钮 */}
+      {/* 语音按钮 */}
         <VoiceButton
           voiceState={voiceState}
           onPressIn={handleVoiceStart}
           onPressOut={handleVoiceStop}
+          onCancel={handleVoiceCancel}
         />
 
         {/* 删除确认弹窗 */}
@@ -455,7 +482,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: spacing.lg,
-    paddingBottom: 20,
+  },
+  mainScroll: {
+    flex: 1,
+  },
+  mainScrollContent: {
+    paddingBottom: 120, // 给底部的悬浮语音按钮留出空间
+    paddingTop: spacing.sm,
   },
 
   // --- 日历 ---
@@ -465,14 +498,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     overflow: 'hidden',
-  },
-
-  // --- 今日概览 ---
-  overviewText: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginTop: spacing.md,
-    paddingHorizontal: spacing.xs,
   },
 
   // --- 文本输入 ---
@@ -533,10 +558,7 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textTertiary,
   },
-  eventList: {
-    flex: 1,
-  },
   eventListInner: {
-    paddingBottom: 100,
+    marginTop: spacing.sm,
   },
 });

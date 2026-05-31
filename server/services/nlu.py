@@ -7,6 +7,7 @@
 import json
 import logging
 import re
+import time
 from datetime import date
 
 import httpx
@@ -46,8 +47,11 @@ _SYSTEM_PROMPT = """你是一个日历事件解析助手。根据用户的语音
 6. 如果用户没说时间，time 设为 null（表示全天事件）
 7. 查询意图不需要 title 和 time
 8. 如果用户说"今天有什么安排"或"帮我看看日程"，意图是 QUERY_EVENT
-9. 如果用户说"把X改到Y"，意图是 MODIFY_EVENT
-10. reply 字段必须是一句简短中文（不超过30字），用于语音播报。语气友好自然。
+10. reply 字段必须非常口语化、像一个俏皮的真人贴身助理，**绝对不能使用机器人的口吻**（如"已经为你添加"、"已修改"等）。
+    - 示例1（添加）："安排上啦！明天下午3点开会，加油哦！" 或 "记好啦，祝玩得开心～"
+    - 示例2（修改）："没问题，已经帮你把时间挪过去啦。"
+    - 示例3（删除）："好的，这个日程我帮你划掉啦。"
+    - 示例4（查询无）："这天空着呢，看来你可以好好放松一下了。"
 11. 只返回 JSON，不要输出任何其他文字。不要在 reply 里写示例或解释。"""
 
 _WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -72,7 +76,8 @@ async def parse_intent(text: str) -> NLUResult:
     prompt = _SYSTEM_PROMPT.format(today=today.isoformat(), weekday=weekday)
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        t0 = time.monotonic()
+        async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 f"{settings.deepseek_base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
@@ -87,7 +92,7 @@ async def parse_intent(text: str) -> NLUResult:
             )
             resp.raise_for_status()
             content = resp.json()["choices"][0]["message"]["content"]
-            logger.info(f"DeepSeek response: {content!r}")
+            logger.info(f"DeepSeek response ({time.monotonic()-t0:.1f}s): {content!r}")
 
         parsed = _extract_json(content)
         return NLUResult(

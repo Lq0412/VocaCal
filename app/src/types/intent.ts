@@ -23,8 +23,8 @@ export interface NLUResult {
 }
 
 export type IntentApplyResult =
-  | {type: 'added'; event: CalendarEvent}
-  | {type: 'query'; events: CalendarEvent[]; date: string}
+  | { type: 'added'; event: CalendarEvent; hasConflict?: boolean }
+  | { type: 'query'; events: CalendarEvent[]; date: string }
   | {type: 'delete_candidates'; events: CalendarEvent[]}
   | {type: 'modify_candidates'; events: CalendarEvent[]; newTitle?: string; newDate?: string; newTime?: string}
   | {type: 'unknown'; message: string};

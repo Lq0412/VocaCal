@@ -17,6 +17,13 @@ export async function applyIntent(intent: NLUResult): Promise<IntentApplyResult>
       return {type: 'unknown', message: '缺少日程标题或日期，请再说一次'};
     }
 
+    const conflicts = await getEventsByDate(intent.date);
+    const hasConflict = !!intent.time && conflicts.some(e => {
+      // 简单匹配：只要都有时间且时间前两小时相同（比如都是下午）就算冲突
+      // 为了精确，这里检查是否完全相同
+      return e.time === intent.time;
+    });
+
     const event = await createEvent({
       title: intent.title,
       date: intent.date,
@@ -24,7 +31,7 @@ export async function applyIntent(intent: NLUResult): Promise<IntentApplyResult>
       note: intent.raw,
     });
 
-    return {type: 'added', event};
+    return {type: 'added', event, hasConflict};
   }
 
   if (intent.intent === 'QUERY_EVENT') {
