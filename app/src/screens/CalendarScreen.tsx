@@ -10,7 +10,7 @@
  * - TTS 语音回复播放
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { parseTextIntent, processVoice, API_BASE_URL } from '../services/apiService';
+import { parseTextIntent, API_BASE_URL } from '../services/apiService';
 import { applyIntent } from '../services/calendarIntentService';
 import {
   deleteEvent,
@@ -32,12 +32,12 @@ import {
   updateEvent,
 } from '../services/storageService';
 import {
-  playFromUrl,
   requestRecordPermission,
-  startRecording,
-  stopRecording,
+  stopPCMPlayback,
 } from '../services/voiceService';
 import type { VoiceState } from '../services/voiceService';
+import { createVoiceSession } from '../services/websocketService';
+import type { NLUResultMsg } from '../services/websocketService';
 import type { CalendarEvent } from '../types/event';
 
 import { Header } from '../components/Header';
@@ -61,6 +61,9 @@ export function CalendarScreen() {
   const [debugText, setDebugText] = useState('');
   const [deleteCandidates, setDeleteCandidates] = useState<CalendarEvent[]>([]);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+  // WebSocket 语音会话引用（跨回调共享）
+  const voiceSessionRef = useRef<ReturnType<typeof createVoiceSession> | null>(null);
 
   // --- 数据库初始化（仅首次挂载） ---
   const [dbReady, setDbReady] = useState(false);
@@ -282,7 +285,7 @@ export function CalendarScreen() {
     }
   }, [handleIntentResult]);
 
-  // --- 语音操作 ---
+  // --- 语音操作（WebSocket 流式） ---
   const handleVoiceStart = useCallback(async () => {
     if (voiceState !== 'idle') return;
 
@@ -293,13 +296,55 @@ export function CalendarScreen() {
     }
 
     try {
-      await startRecording();
+      // 创建 WebSocket 语音会话并开始录音
+      const session = createVoiceSession({
+        onASRFinal: (text) => {
+          if (text) {
+            setStatusMessage('识别：' + text);
+          }
+        },
+        onNLUResult: async (msg: NLUResultMsg) => {
+          let finalReply = msg.reply_text;
+          if (msg.event?.intent) {
+            const overrideReply = await handleIntentResult(msg.event, msg.reply_text);
+            if (overrideReply) {
+              finalReply = overrideReply;
+            }
+          } else if (msg.reply_text) {
+            setStatusMessage(msg.reply_text);
+          }
+
+          // TTS 音频块已经在 WebSocket 消息中流式到达，
+          // 由 websocketService 自动喂给原生 AudioTrack，
+          // 这里只需启动播放器
+          if (finalReply) {
+            try { await session.startPCMPlayback(); } catch {}
+          }
+        },
+        onTTSEnd: () => {
+          // TTS 传输完毕，延迟一小段时间让播放结束
+          setTimeout(() => {
+            session.stopPCMPlayback();
+            setVoiceState('idle');
+          }, 500);
+        },
+        onError: (message) => {
+          setStatusMessage(message);
+          setVoiceState('idle');
+        },
+      });
+
+      // 存到 ref 以便 stop 时使用
+      voiceSessionRef.current = session;
+
+      await session.start();
       setVoiceState('recording');
       setStatusMessage('正在录音，松开结束...');
-    } catch {
-      setStatusMessage('录音启动失败');
+    } catch (e: any) {
+      setStatusMessage('连接失败：' + (e?.message || '请重试'));
+      setVoiceState('idle');
     }
-  }, [voiceState]);
+  }, [voiceState, handleIntentResult]);
 
   const handleVoiceStop = useCallback(async () => {
     if (voiceState !== 'recording') return;
@@ -308,39 +353,16 @@ export function CalendarScreen() {
     setStatusMessage('处理中...');
 
     try {
-      const path = await stopRecording();
-      const result = await processVoice(path);
-
-      if (result.text) {
-        setStatusMessage('识别：' + result.text);
-      }
-
-      let finalReply = result.reply_text;
-      if (result.event?.intent) {
-        const overrideReply = await handleIntentResult(result.event, result.reply_text);
-        if (overrideReply) {
-           finalReply = overrideReply;
-        }
-      } else if (result.reply_text) {
-        setStatusMessage(result.reply_text);
-      }
-
-      // TTS 播放语音回复
-      if (finalReply) {
-        const ttsUrl = API_BASE_URL + '/api/tts/speak?text=' + encodeURIComponent(finalReply);
-        playFromUrl(ttsUrl);
-      }
-    } catch (e: any) {
-      setStatusMessage('语音处理失败：' + (e?.message || '请重试'));
-    } finally {
+      await voiceSessionRef.current?.stop();
+    } catch {
       setVoiceState('idle');
     }
-  }, [voiceState, handleIntentResult]);
+  }, [voiceState]);
 
   const handleVoiceCancel = useCallback(async () => {
     if (voiceState !== 'recording') return;
     try {
-      await stopRecording();
+      voiceSessionRef.current?.close();
     } catch {
       // ignore
     }
