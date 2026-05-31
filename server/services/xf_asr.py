@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import ssl
 from datetime import datetime
 from time import mktime
@@ -14,6 +15,8 @@ from wsgiref.handlers import format_date_time
 import websockets
 
 from config import settings
+
+logger = logging.getLogger("xf_asr")
 
 # 中英识别大模型（用户已开通）
 _HOST = "iat.xf-yun.com"
@@ -130,7 +133,9 @@ async def recognize(audio_bytes: bytes) -> str:
             else:
                 await ws.send(_build_continue_frame(audio_b64))
 
-            await asyncio.sleep(_FRAME_INTERVAL)
+            # 对于已录制好的完整音频，不需要模拟实时音频流的停顿，
+            # 直接全速发送可大幅降低识别延迟。
+            await asyncio.sleep(0)
 
         # 发送末帧（空音频）
         await ws.send(_build_last_frame(""))
@@ -153,3 +158,70 @@ async def recognize(audio_bytes: bytes) -> str:
                 break
 
     return result_text
+
+
+class StreamingASRSession:
+    """流式 ASR 会话：音频块逐帧转发讯飞，边收边识别。
+
+    用于 WebSocket 端点：录音的同时就把 PCM 块发给讯飞，
+    用户松手时 ASR 可能已经识别完毕，大幅降低延迟。
+    """
+
+    def __init__(self):
+        self._ws = None
+        self._first_sent = False
+        self._text = ""
+        self._done = asyncio.Event()
+
+    async def start(self):
+        """建立讯飞 ASR WebSocket 连接，启动后台接收协程"""
+        url = _build_auth_url()
+        ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        self._ws = await websockets.connect(url, ssl=ssl_ctx)
+        asyncio.create_task(self._recv_loop())
+        logger.info("StreamingASR started")
+
+    async def send_chunk(self, pcm: bytes):
+        """发送一个 PCM 音频块到讯飞"""
+        if not self._ws:
+            return
+        audio_b64 = base64.b64encode(pcm).decode("utf-8")
+        if not self._first_sent:
+            await self._ws.send(_build_first_frame(audio_b64))
+            self._first_sent = True
+        else:
+            await self._ws.send(_build_continue_frame(audio_b64))
+
+    async def finish(self) -> str:
+        """结束音频输入，等待最终识别结果并返回完整文本"""
+        if not self._ws:
+            return ""
+        await self._ws.send(_build_last_frame(""))
+        await self._done.wait()
+        await self._ws.close()
+        logger.info(f"StreamingASR finished: {self._text!r}")
+        return self._text
+
+    async def _recv_loop(self):
+        """后台接收讯飞返回的识别结果，累加文本"""
+        try:
+            while True:
+                msg = await asyncio.wait_for(self._ws.recv(), timeout=15)
+                data = json.loads(msg)
+                code = data.get("header", {}).get("code", -1)
+                if code != 0:
+                    logger.error(f"ASR error: code={code}")
+                    break
+                payload = data.get("payload")
+                if payload and "result" in payload:
+                    self._text += _parse_result(payload["result"]["text"])
+                if data.get("header", {}).get("status") == 2:
+                    break
+        except asyncio.TimeoutError:
+            logger.error("ASR recv timeout")
+        except Exception as e:
+            logger.error(f"ASR recv error: {e}")
+        finally:
+            self._done.set()

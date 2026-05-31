@@ -1,10 +1,16 @@
-"""讯飞 TTS 语音合成 — 在线语音合成 WebSocket"""
+"""讯飞 TTS 语音合成 — 在线语音合成 WebSocket
+
+支持两种模式：
+- synthesize(): 一次性合成，返回完整 PCM bytes（HTTP 端点用）
+- synthesize_streaming(): 流式合成，每收到一块就 yield（WebSocket 端点用）
+"""
 
 import asyncio
 import base64
 import hashlib
 import hmac
 import json
+import logging
 import ssl
 from datetime import datetime
 from time import mktime
@@ -14,6 +20,8 @@ from wsgiref.handlers import format_date_time
 import websockets
 
 from config import settings
+
+logger = logging.getLogger("xf_tts")
 
 _HOST = "tts-api.xfyun.cn"
 _PATH = "/v2/tts"
@@ -93,3 +101,42 @@ async def synthesize(text: str, vcn: str = "x4_yezi") -> bytes:
                 break
 
     return b"".join(audio_chunks)
+
+
+async def synthesize_streaming(text: str, vcn: str = "x4_yezi"):
+    """流式 TTS 合成：每收到一块 PCM 音频就 yield，前端可边收边播。"""
+    url = _build_auth_url()
+    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+
+    request = json.dumps({
+        "common": {"app_id": settings.xf_app_id},
+        "business": {
+            "aue": "raw",
+            "auf": "audio/L16;rate=16000",
+            "vcn": vcn,
+            "tte": "UTF8",
+            "speed": 50,
+            "volume": 100,
+            "pitch": 50,
+        },
+        "data": {
+            "status": 2,
+            "text": base64.b64encode(text.encode("utf-8")).decode("utf-8"),
+        },
+    })
+
+    async with websockets.connect(url, ssl=ssl_ctx) as ws:
+        await ws.send(request)
+        while True:
+            msg = await asyncio.wait_for(ws.recv(), timeout=15)
+            data = json.loads(msg)
+            code = data.get("code", -1)
+            if code != 0:
+                raise RuntimeError(f"讯飞 TTS 错误: code={code}, message={data.get('message', '')}")
+            audio_data = data.get("data")
+            if audio_data and audio_data.get("audio"):
+                yield base64.b64decode(audio_data["audio"])
+            if audio_data and audio_data.get("status") == 2:
+                break

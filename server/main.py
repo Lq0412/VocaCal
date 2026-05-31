@@ -1,10 +1,11 @@
 import base64
 import io
+import json
 import logging
 import struct
 import time
 
-from fastapi import FastAPI, File, Query, UploadFile
+from fastapi import FastAPI, File, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
@@ -207,3 +208,104 @@ async def tts_speak(text: str = Query(...)):
 async def check_conflict(date: str = Query(...), time: str = Query(None)):
     """检查指定日期时间是否有事件冲突（供前端调用）"""
     return {"date": date, "time": time, "has_conflict": False}
+
+
+@app.websocket("/ws/voice")
+async def ws_voice(ws: WebSocket):
+    """
+    WebSocket 语音流处理端点。
+
+    协议：
+      前端 → 后端（text 帧）: {"type": "audio_start"} / {"type": "audio_end"}
+      前端 → 后端（binary 帧）: PCM 16kHz 16bit mono 音频块
+      后端 → 前端（text 帧）: {"type": "asr_final", "text": "..."} 等 JSON 消息
+      后端 → 前端（binary 帧）: TTS PCM 音频块
+
+    流程：实时收音频 → 流式 ASR → NLU → 流式 TTS
+    """
+    await ws.accept()
+    logger.info("[WS] Client connected")
+
+    asr_session = None
+
+    try:
+        # ── 阶段 1：接收音频流，实时转发给讯飞 ASR ──
+        while True:
+            msg = await ws.receive()
+
+            if msg["type"] == "websocket.disconnect":
+                return
+
+            if msg["type"] == "websocket.receive":
+                if msg.get("bytes"):
+                    # 二进制帧 = PCM 音频块，直接转发给 ASR
+                    if asr_session:
+                        await asr_session.send_chunk(msg["bytes"])
+
+                elif msg.get("text"):
+                    data = json.loads(msg["text"])
+
+                    if data.get("type") == "audio_start":
+                        asr_session = xf_asr.StreamingASRSession()
+                        await asr_session.start()
+
+                    elif data.get("type") == "audio_end":
+                        break
+
+        if not asr_session:
+            await ws.send_json({"type": "error", "message": "未收到音频"})
+            return
+
+        # ── 阶段 2：等待 ASR 最终结果 ──
+        text = await asr_session.finish()
+
+        if not text:
+            await ws.send_json({"type": "asr_final", "text": ""})
+            await ws.send_json({
+                "type": "nlu_result",
+                "intent": None,
+                "event": None,
+                "reply_text": "没听清，请再说一次",
+            })
+            await ws.send_json({"type": "tts_end"})
+            return
+
+        await ws.send_json({"type": "asr_final", "text": text})
+
+        # ── 阶段 3：NLU 意图解析 ──
+        result = await nlu.parse_intent(text)
+        reply_text = _build_reply(result)
+
+        await ws.send_json({
+            "type": "nlu_result",
+            "intent": result.intent,
+            "event": {
+                "intent": result.intent,
+                "title": result.title,
+                "date": result.date,
+                "time": result.time,
+                "new_title": result.new_title,
+                "new_date": result.new_date,
+                "new_time": result.new_time,
+                "reply": result.reply,
+                "raw": result.raw,
+            } if result.intent else None,
+            "reply_text": reply_text,
+        })
+
+        # ── 阶段 4：流式 TTS ──
+        if reply_text:
+            async for pcm_chunk in xf_tts.synthesize_streaming(reply_text):
+                await ws.send_bytes(pcm_chunk)
+
+        await ws.send_json({"type": "tts_end"})
+        logger.info("[WS] Pipeline complete")
+
+    except WebSocketDisconnect:
+        logger.info("[WS] Client disconnected")
+    except Exception as e:
+        logger.error(f"[WS] Error: {e}")
+        try:
+            await ws.send_json({"type": "error", "message": "处理失败，请重试"})
+        except Exception:
+            pass
