@@ -2,7 +2,7 @@
 
 > **七牛云 × XEngineer 暑期实训营 · 题目一 · 语音版日历工具**
 
-Demo 视频: [Bilibili](https://www.bilibili.com/video/BV1znVn64EXH/)
+[![VocaCal Demo 视频](docs/demo-thumbnail.jpg)](https://www.bilibili.com/video/BV1znVn64EXH/)
 
 ##  产品亮点
 
