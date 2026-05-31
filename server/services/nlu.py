@@ -82,7 +82,7 @@ async def parse_intent(text: str) -> NLUResult:
                 f"{settings.deepseek_base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
                 json={
-                    "model": "deepseek-v4-pro",
+                    "model": "deepseek-v4flash",
                     "temperature": 0.1,
                     "messages": [
                         {"role": "system", "content": prompt},
