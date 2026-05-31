@@ -2,8 +2,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
-# .env 在项目根目录（server/ 的上一级）
-_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+# .env 在 server 目录下
+_ENV_FILE = Path(__file__).resolve().parent / ".env"
 
 
 class Settings(BaseSettings):
