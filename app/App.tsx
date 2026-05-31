@@ -6,7 +6,7 @@ import { CalendarScreen } from './src/screens/CalendarScreen';
 function App() {
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="dark-content" backgroundColor="#f5f7fb" />
+      <StatusBar barStyle="dark-content" backgroundColor="#F6F5F2" />
       <CalendarScreen />
     </SafeAreaProvider>
   );
