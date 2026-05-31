@@ -6,7 +6,7 @@
 
 [![VocaCal Demo](docs/demo-thumbnail.jpg)](https://www.bilibili.com/video/BV1znVn64EXH/)
 
-[![](https://img.shields.io/badge/-Click%20to%20Watch%20Demo-bilibili-Pink?style=for-the-badge&logo=bilibili)](https://www.bilibili.com/video/BV1znVn64EXH/)
+[![](https://img.shields.io/badge/-Click%20to%20Watch%20Demo-FB7299?style=for-the-badge)](https://www.bilibili.com/video/BV1znVn64EXH/)
 
 </div>
 
