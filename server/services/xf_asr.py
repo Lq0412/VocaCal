@@ -20,9 +20,9 @@ _HOST = "iat.xf-yun.com"
 _PATH = "/v1"
 _ENDPOINT = f"wss://{_HOST}{_PATH}"
 
-# 每帧音频大小和发送间隔
+# 每帧音频大小和发送间隔（0.005s 实测讯飞可承受，比 0.01 省约 200ms）
 _FRAME_SIZE = 2560
-_FRAME_INTERVAL = 0.01
+_FRAME_INTERVAL = 0.005
 
 
 def _build_auth_url() -> str:

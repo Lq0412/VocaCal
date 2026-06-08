@@ -1,20 +1,57 @@
+import asyncio
 import base64
 import io
 import logging
 import struct
 import time
+from collections import OrderedDict
 
-from fastapi import FastAPI, File, Query, UploadFile
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, File, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from models.schemas import NLUParseRequest, NLUResult, VoiceProcessResponse
-from services import nlu, xf_asr, xf_tts
+from services import nlu, xf_asr, xf_asr_stream, xf_tts
 
 logger = logging.getLogger("vocacal")
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="VocaCal Backend", version="0.1.0")
+# TTS 预合成缓存：主管线返回时异步启动 TTS 合成，前端请求时直接命中
+_tts_cache: OrderedDict[str, asyncio.Task] = OrderedDict()
+_TTS_CACHE_MAX = 20
+
+
+def _schedule_tts(text: str) -> None:
+    """非阻塞地启动 TTS 合成任务，结果缓存供 /api/tts/speak 使用"""
+    if not text or text in _tts_cache:
+        return
+    if len(_tts_cache) >= _TTS_CACHE_MAX:
+        _, oldest = _tts_cache.popitem(last=False)
+        oldest.cancel()
+    _tts_cache[text] = asyncio.create_task(_do_tts(text))
+
+
+async def _do_tts(text: str) -> bytes:
+    """执行 TTS 合成并返回 WAV bytes"""
+    pcm = await xf_tts.synthesize(text)
+    return _wrap_wav_header(pcm)
+
+@asynccontextmanager
+async def _lifespan(application: FastAPI):
+    """预热外部服务连接，消除首次请求的冷启动延迟"""
+    logger.info("[Warmup] Pre-connecting to DeepSeek...")
+    try:
+        client = nlu._get_client()
+        await client.head(f"{nlu.settings.deepseek_base_url}/models", timeout=5)
+        logger.info("[Warmup] DeepSeek connection ready")
+    except Exception:
+        logger.info("[Warmup] DeepSeek warmup skipped (non-critical)")
+    yield
+
+
+app = FastAPI(title="VocaCal Backend", version="0.1.0", lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -88,8 +125,10 @@ async def voice_process(audio: UploadFile = File(...)):
     reply_text = _build_reply(result)
     logger.info(f"[Pipeline] Total: {time.monotonic()-t_start:.1f}s → {reply_text!r}")
 
-    # 前端通过 /api/tts/speak 端点独立播放语音回复，
-    # 此处不再重复合成 TTS，节省 1-3 秒响应时间
+    # 异步预合成 TTS：前端收到响应后请求 /api/tts/speak 时大概率已合成好，
+    # 省掉前端等待 TTS 的 1-2 秒
+    _schedule_tts(reply_text)
+
     return VoiceProcessResponse(
         text=text,
         intent=result.intent,
@@ -194,13 +233,97 @@ def _wrap_wav_header(
 
 @app.get("/api/tts/speak")
 async def tts_speak(text: str = Query(...)):
-    """TTS 播放端点，返回 WAV 音频流供前端直接播放。"""
+    """TTS 播放端点。优先从预合成缓存获取，命中时几乎零延迟。"""
     try:
-        pcm = await xf_tts.synthesize(text)
-        wav = _wrap_wav_header(pcm)
+        task = _tts_cache.get(text)
+        if task is not None:
+            wav = await task
+            logger.info(f"[TTS] cache hit: {text!r}")
+        else:
+            pcm = await xf_tts.synthesize(text)
+            wav = _wrap_wav_header(pcm)
         return Response(content=wav, media_type="audio/wav")
     except Exception:
         return Response(status_code=500)
+
+
+@app.websocket("/ws/voice")
+async def ws_voice(websocket: WebSocket):
+    """WebSocket 流式语音管线：边说边识别，松开后快速返回结果。
+
+    协议：
+      客户端 → 服务端:
+        - 二进制帧: PCM 音频块 (16kHz 16bit mono)
+        - 文本帧 "END": 结束录音
+      服务端 → 客户端:
+        - JSON: {"type":"result", "text":"...", "intent":"...", "event":{...}, "reply_text":"..."}
+        - JSON: {"type":"error", "message":"..."}
+    """
+    await websocket.accept()
+    asr = xf_asr_stream.StreamingASR()
+    t_start = time.monotonic()
+
+    try:
+        await asr.start()
+        logger.info("[WS] ASR stream started")
+
+        while True:
+            message = await websocket.receive()
+
+            if message.get("type") == "websocket.disconnect":
+                await asr.cancel()
+                return
+
+            if "bytes" in message and message["bytes"]:
+                await asr.feed(message["bytes"])
+
+            elif "text" in message:
+                text_data = message["text"].strip()
+                if text_data.upper() == "END":
+                    break
+                # base64 编码的 PCM 音频块
+                try:
+                    pcm_chunk = base64.b64decode(text_data)
+                    await asr.feed(pcm_chunk)
+                except Exception:
+                    pass
+
+        # 录音结束，获取最终 ASR 结果
+        t0 = time.monotonic()
+        text = await asr.finish()
+        logger.info(f"[WS] ASR done in {time.monotonic()-t0:.1f}s: {text!r}")
+
+        if not text:
+            await websocket.send_json({"type": "result", "text": "", "reply_text": "没听清，请再说一次"})
+            return
+
+        # NLU
+        t0 = time.monotonic()
+        result = await nlu.parse_intent(text)
+        logger.info(f"[WS] NLU done in {time.monotonic()-t0:.1f}s: intent={result.intent}")
+
+        reply_text = _build_reply(result)
+        _schedule_tts(reply_text)
+
+        logger.info(f"[WS] Total: {time.monotonic()-t_start:.1f}s")
+
+        await websocket.send_json({
+            "type": "result",
+            "text": text,
+            "intent": result.intent,
+            "event": result.model_dump() if result.intent else None,
+            "reply_text": reply_text,
+        })
+
+    except WebSocketDisconnect:
+        await asr.cancel()
+    except Exception as e:
+        logger.error(f"[WS] Error: {e}")
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
+        await asr.cancel()
 
 
 @app.get("/api/events/check-conflict")

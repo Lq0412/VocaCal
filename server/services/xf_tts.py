@@ -62,7 +62,7 @@ async def synthesize(text: str, vcn: str = "x4_yezi") -> bytes:
             "auf": "audio/L16;rate=16000",
             "vcn": vcn,
             "tte": "UTF8",
-            "speed": 50,
+            "speed": 75,
             "volume": 100,
             "pitch": 50,
         },

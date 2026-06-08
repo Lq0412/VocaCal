@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { parseTextIntent, processVoice, API_BASE_URL } from '../services/apiService';
+import { parseTextIntent, API_BASE_URL } from '../services/apiService';
 import { applyIntent } from '../services/calendarIntentService';
 import {
   deleteEvent,
@@ -33,11 +33,14 @@ import {
 } from '../services/storageService';
 import {
   playFromUrl,
-  requestRecordPermission,
-  startRecording,
-  stopRecording,
 } from '../services/voiceService';
 import type { VoiceState } from '../services/voiceService';
+import {
+  cancelStream,
+  requestStreamPermission,
+  startStream,
+  stopStream,
+} from '../services/voiceStreamService';
 import type { CalendarEvent } from '../types/event';
 
 import { Header } from '../components/Header';
@@ -282,22 +285,22 @@ export function CalendarScreen() {
     }
   }, [handleIntentResult]);
 
-  // --- 语音操作 ---
+  // --- 语音操作（WebSocket 流式） ---
   const handleVoiceStart = useCallback(async () => {
     if (voiceState !== 'idle') return;
 
-    const granted = await requestRecordPermission();
+    const granted = await requestStreamPermission();
     if (!granted) {
       setStatusMessage('需要录音权限才能使用语音功能');
       return;
     }
 
     try {
-      await startRecording();
+      await startStream();
       setVoiceState('recording');
       setStatusMessage('正在录音，松开结束...');
     } catch {
-      setStatusMessage('录音启动失败');
+      setStatusMessage('连接失败，请检查后端');
     }
   }, [voiceState]);
 
@@ -308,8 +311,7 @@ export function CalendarScreen() {
     setStatusMessage('处理中...');
 
     try {
-      const path = await stopRecording();
-      const result = await processVoice(path);
+      const result = await stopStream();
 
       if (result.text) {
         setStatusMessage('识别：' + result.text);
@@ -319,13 +321,12 @@ export function CalendarScreen() {
       if (result.event?.intent) {
         const overrideReply = await handleIntentResult(result.event, result.reply_text);
         if (overrideReply) {
-           finalReply = overrideReply;
+          finalReply = overrideReply;
         }
       } else if (result.reply_text) {
         setStatusMessage(result.reply_text);
       }
 
-      // TTS 播放语音回复
       if (finalReply) {
         const ttsUrl = API_BASE_URL + '/api/tts/speak?text=' + encodeURIComponent(finalReply);
         playFromUrl(ttsUrl);
@@ -339,11 +340,7 @@ export function CalendarScreen() {
 
   const handleVoiceCancel = useCallback(async () => {
     if (voiceState !== 'recording') return;
-    try {
-      await stopRecording();
-    } catch {
-      // ignore
-    }
+    cancelStream();
     setVoiceState('idle');
     setStatusMessage('已取消录音');
   }, [voiceState]);
