@@ -32,6 +32,21 @@ def test_nlu_result_rejects_unknown_intent():
         NLUResult(intent="UPDATE_EVENT", raw="改一下明天的会")
 
 
+def test_nlu_result_accepts_date_range_and_events():
+    from models.schemas import DateRange, ParsedEventItem
+
+    result = NLUResult(
+        intent="QUERY_EVENT",
+        date_range=DateRange(start="2026-06-09", end="2026-06-15"),
+        events=[ParsedEventItem(title="开会", date="2026-06-12", time="15:00")],
+        raw="看看这周安排",
+    )
+
+    assert result.date_range is not None
+    assert result.date_range.start == "2026-06-09"
+    assert len(result.events) == 1
+
+
 def test_parse_intent_returns_empty_result_when_deepseek_key_missing(monkeypatch):
     calls = []
 

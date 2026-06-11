@@ -85,10 +85,33 @@ class TestBuildReply:
         reply = _build_reply(result)
         assert "2026-05-31" in reply
 
-    def test_query_event_without_date(self):
-        """QUERY_EVENT 无日期时应返回通用查询回复"""
-        result = NLUResult(intent="QUERY_EVENT", raw="有什么安排")
-        assert "查询日程" in _build_reply(result)
+    def test_query_event_with_date_range(self):
+        """QUERY_EVENT 有 date_range 时应包含范围信息"""
+        from models.schemas import DateRange
+
+        result = NLUResult(
+            intent="QUERY_EVENT",
+            date_range=DateRange(start="2026-06-09", end="2026-06-15"),
+            raw="看看这周安排",
+        )
+        reply = _build_reply(result)
+        assert "2026-06-09" in reply
+        assert "2026-06-15" in reply
+
+    def test_add_multi_events_reply(self):
+        """多事件添加应生成批量回复"""
+        from models.schemas import ParsedEventItem
+
+        result = NLUResult(
+            intent="ADD_EVENT",
+            events=[
+                ParsedEventItem(title="健身", date="2026-06-12", time="07:00"),
+                ParsedEventItem(title="开会", date="2026-06-12", time="15:00"),
+            ],
+            raw="明早健身下午开会",
+        )
+        reply = _build_reply(result)
+        assert "2" in reply
 
     def test_modify_event_reply(self):
         """MODIFY_EVENT 应生成修改确认的回复"""

@@ -147,6 +147,9 @@ def _build_reply(result: NLUResult) -> str:
     if not result.intent:
         return "抱歉没理解，试试说：明天下午三点开会"
 
+    if result.intent == "ADD_EVENT" and result.events and len(result.events) > 1:
+        return f"帮你安排了{len(result.events)}件事"
+
     if result.intent == "ADD_EVENT":
         parts = ["已添加"]
         if result.date:
@@ -170,6 +173,8 @@ def _build_reply(result: NLUResult) -> str:
         return "".join(parts)
 
     if result.intent == "QUERY_EVENT":
+        if result.date_range:
+            return f"查询{result.date_range.start}到{result.date_range.end}的日程"
         if result.date:
             return f"查询{result.date}的日程"
         return "查询日程"

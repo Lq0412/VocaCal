@@ -28,8 +28,13 @@ def _get_client() -> httpx.AsyncClient:
     return _http_client
 
 _SYSTEM_PROMPT = """日历意图解析。今天{today}({weekday})。只返回JSON。
-{{"intent":"ADD_EVENT|DELETE_EVENT|QUERY_EVENT|MODIFY_EVENT","title":"简短标题","date":"YYYY-MM-DD","time":"HH:MM或null","new_title":"仅修改用","new_date":"仅修改用","new_time":"仅修改用","reply":"≤10字口语回复"}}
-规则：明天/后天/大后天按日期推算；下周X=下一个周X；上午9点,下午3点,晚上7点,中午12点；没说时间time=null；查询不需title/time。reply要俏皮简短如"安排上啦！""帮你记好啦~""划掉啦！"。"""
+{{"intent":"ADD_EVENT|DELETE_EVENT|QUERY_EVENT|MODIFY_EVENT","title":"简短标题","date":"YYYY-MM-DD","time":"HH:MM或null","new_title":"仅修改用","new_date":"仅修改用","new_time":"仅修改用","date_range":{{"start":"YYYY-MM-DD","end":"YYYY-MM-DD"}}或null,"events":[{{"title":"","date":"","time":null}}]或null,"reply":"≤15字口语回复"}}
+规则：
+- 明天/后天/大后天按日期推算；下周X=下一个周X；上午9点,下午3点,晚上7点,中午12点；没说时间time=null
+- 查询单日用date；范围查询用date_range（这周=本周一至周日，下周=下周一至周日，这个月底=本月最后一天，周末=最近周六至周日），此时date=null
+- 一句话多个安排（如"明早健身、下午开会、晚上聚餐"）intent=ADD_EVENT，events数组含每项，title/date/time可留空用顶层字段
+- 单事件时events=null，用顶层title/date/time
+- reply俏皮简短如'安排上啦！'或'这周5个安排~'"""
 
 _WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
@@ -67,7 +72,7 @@ async def parse_intent(text: str) -> NLUResult:
             json={
                 "model": "deepseek-v4-flash",
                 "temperature": 0.0,
-                "max_tokens": 150,
+                "max_tokens": 300,
                 "messages": [
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": text},
@@ -84,6 +89,20 @@ async def parse_intent(text: str) -> NLUResult:
             return NLUResult(intent=None, raw=text)
 
         parsed = _extract_json(content)
+        date_range_raw = parsed.get("date_range")
+        date_range = None
+        if isinstance(date_range_raw, dict) and date_range_raw.get("start") and date_range_raw.get("end"):
+            date_range = date_range_raw
+
+        events_raw = parsed.get("events")
+        events = None
+        if isinstance(events_raw, list) and len(events_raw) > 0:
+            events = [
+                {"title": item.get("title"), "date": item.get("date"), "time": item.get("time")}
+                for item in events_raw
+                if isinstance(item, dict)
+            ]
+
         return NLUResult(
             intent=parsed.get("intent"),
             title=parsed.get("title"),
@@ -92,6 +111,8 @@ async def parse_intent(text: str) -> NLUResult:
             new_title=parsed.get("new_title"),
             new_date=parsed.get("new_date"),
             new_time=parsed.get("new_time"),
+            date_range=date_range,
+            events=events,
             reply=parsed.get("reply"),
             raw=text,
         )

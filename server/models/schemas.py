@@ -5,7 +5,7 @@
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class NLUParseRequest(BaseModel):
@@ -14,6 +14,19 @@ class NLUParseRequest(BaseModel):
 
 
 CalendarIntent = Literal["ADD_EVENT", "DELETE_EVENT", "QUERY_EVENT", "MODIFY_EVENT"]
+
+
+class ParsedEventItem(BaseModel):
+    """单条待添加事件（多事件拆分时使用）"""
+    title: Optional[str] = None
+    date: Optional[str] = None
+    time: Optional[str] = None
+
+
+class DateRange(BaseModel):
+    """日期范围查询"""
+    start: str
+    end: str
 
 
 class NLUResult(BaseModel):
@@ -26,6 +39,10 @@ class NLUResult(BaseModel):
     new_title: Optional[str] = None
     new_date: Optional[str] = None
     new_time: Optional[str] = None
+    # 范围查询：这周/下周/本月等
+    date_range: Optional[DateRange] = None
+    # 一句话多事件拆分
+    events: Optional[list[ParsedEventItem]] = Field(default=None)
     # 自然语言回复（用于 TTS 播报）
     reply: Optional[str] = None
     raw: str = ""
