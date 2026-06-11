@@ -65,7 +65,7 @@ async def parse_intent(text: str) -> NLUResult:
             f"{settings.deepseek_base_url}/chat/completions",
             headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
             json={
-                "model": "deepseek-v4flash",
+                "model": "deepseek-v4-flash",
                 "temperature": 0.0,
                 "max_tokens": 150,
                 "messages": [
@@ -90,6 +90,12 @@ async def parse_intent(text: str) -> NLUResult:
             reply=parsed.get("reply"),
             raw=text,
         )
+    except httpx.HTTPStatusError as e:
+        # 打印响应体，方便定位 400/401 等错误的具体原因（如模型名错误、key 失效）
+        logger.error(
+            f"NLU parse failed: {e.response.status_code} {e.response.text[:300]}"
+        )
+        return NLUResult(intent=None, raw=text)
     except Exception as e:
         logger.error(f"NLU parse failed: {type(e).__name__}: {e}")
         return NLUResult(intent=None, raw=text)
