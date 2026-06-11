@@ -91,6 +91,37 @@ export async function getEventsByDate(date: string): Promise<CalendarEvent[]> {
   return sortEventsBySchedule(rowsToEvents(result));
 }
 
+export async function getEventsByDateRange(
+  start: string,
+  end: string,
+): Promise<CalendarEvent[]> {
+  const result = await executeSql(
+    `SELECT id, title, date, time, note, created_at, updated_at
+     FROM events
+     WHERE date >= ? AND date <= ?
+     ORDER BY date ASC, time ASC`,
+    [start, end],
+  );
+
+  return sortEventsBySchedule(rowsToEvents(result));
+}
+
+export async function restoreEvent(event: CalendarEvent): Promise<CalendarEvent> {
+  const now = new Date().toISOString();
+  const result = await executeSql(
+    `INSERT INTO events (title, date, time, note, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [event.title, event.date, event.time, event.note, now, now],
+  );
+
+  return {
+    ...event,
+    id: result.insertId,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
 export async function findEvents(
   criteria: FindEventsCriteria,
 ): Promise<CalendarEvent[]> {
