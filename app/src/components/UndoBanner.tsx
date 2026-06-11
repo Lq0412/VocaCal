@@ -18,17 +18,17 @@ export function UndoBanner({ message, onUndo, onExpire, durationMs = 5000 }: Und
 
   useEffect(() => {
     setSecondsLeft(Math.ceil(durationMs / 1000));
+
+    const expireTimeout = setTimeout(onExpire, durationMs);
+
     const interval = setInterval(() => {
-      setSecondsLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          onExpire();
-          return 0;
-        }
-        return prev - 1;
-      });
+      setSecondsLeft(prev => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
-    return () => clearInterval(interval);
+
+    return () => {
+      clearTimeout(expireTimeout);
+      clearInterval(interval);
+    };
   }, [message, durationMs, onExpire]);
 
   return (
