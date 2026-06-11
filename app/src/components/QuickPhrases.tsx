@@ -1,7 +1,7 @@
 /**
- * QuickPhrases — 快捷短语横向滚动条
+ * QuickPhrases — 快捷短语横向滚动条（iOS 风格）
  *
- * 白底灰边药丸，不用彩色背景。
+ * 浅灰填充药丸，无边框，点击触发指令。
  */
 
 import React from 'react';
@@ -41,26 +41,24 @@ export function QuickPhrases({ visible, onSelect }: QuickPhrasesProps) {
 const styles = StyleSheet.create({
   scroll: {
     marginTop: spacing.sm,
-    maxHeight: 36,
+    maxHeight: 38,
   },
   content: {
     paddingHorizontal: 2,
     gap: spacing.sm,
   },
   chip: {
-    borderRadius: 18,
+    borderRadius: 999,
     paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderWidth: 1,
-    borderColor: colors.border,
+    paddingVertical: 8,
     backgroundColor: colors.surface,
   },
   chipPressed: {
-    backgroundColor: colors.border,
+    backgroundColor: colors.fill,
   },
   chipText: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.textBody,
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.tint,
   },
 });

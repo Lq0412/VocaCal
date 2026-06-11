@@ -1,7 +1,7 @@
 /**
- * Header — 标题栏
+ * Header — iOS Large Title 标题栏
  *
- * 左对齐标题 + 右侧「今天」文字按钮，简约无背景色。
+ * 左侧 34pt 大标题 + 灰色副标题，右侧蓝色「今天」文字按钮。
  */
 
 import React from 'react';
@@ -15,13 +15,14 @@ interface HeaderProps {
 export function Header({ onTodayPress }: HeaderProps) {
   return (
     <View style={styles.container}>
-      <View>
+      <View style={styles.titleBlock}>
         <Text style={styles.title}>VocaCal</Text>
         <Text style={styles.subtitle}>语音日历助手</Text>
       </View>
       <Pressable
         style={({ pressed }) => [styles.todayButton, pressed && styles.todayButtonPressed]}
         onPress={onTodayPress}
+        hitSlop={8}
       >
         <Text style={styles.todayText}>今天</Text>
       </Pressable>
@@ -33,28 +34,31 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: spacing.md,
-    paddingBottom: spacing.lg,
+    alignItems: 'flex-end',
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
+  },
+  titleBlock: {
+    flex: 1,
   },
   title: {
-    ...typography.title,
+    ...typography.largeTitle,
   },
   subtitle: {
-    ...typography.caption,
+    ...typography.subhead,
     marginTop: 2,
   },
   todayButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: 6,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginBottom: 4,
   },
   todayButtonPressed: {
-    backgroundColor: colors.border,
+    opacity: 0.4,
   },
   todayText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.accent,
+    fontSize: 17,
+    fontWeight: '400',
+    color: colors.tint,
   },
 });

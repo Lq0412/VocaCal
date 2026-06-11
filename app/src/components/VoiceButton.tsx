@@ -1,7 +1,8 @@
 /**
- * VoiceButton — 底部悬浮语音按钮
+ * VoiceButton — 底部悬浮语音按钮（iOS 风格）
  *
- * 现代 CSS 麦克风图标，支持上滑取消录音。
+ * iOS 系统蓝圆形按钮，录音时呼吸光晕，支持上滑取消。
+ * 交互逻辑（按住说话 / 上滑取消）保持不变，仅视觉重做。
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -18,6 +19,7 @@ interface VoiceButtonProps {
 
 export function VoiceButton({ voiceState, onPressIn, onPressOut, onCancel }: VoiceButtonProps) {
   const [pulseAnim] = useState(new Animated.Value(1));
+  const [haloAnim] = useState(new Animated.Value(0));
   const [isCanceling, setIsCanceling] = useState(false);
   const pulseRef = useRef<Animated.CompositeAnimation | null>(null);
 
@@ -31,14 +33,14 @@ export function VoiceButton({ voiceState, onPressIn, onPressOut, onCancel }: Voi
     if (voiceState === 'recording') {
       const anim = Animated.loop(
         Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 0.7,
-            duration: 700,
+          Animated.timing(haloAnim, {
+            toValue: 1,
+            duration: 900,
             useNativeDriver: true,
           }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 700,
+          Animated.timing(haloAnim, {
+            toValue: 0,
+            duration: 900,
             useNativeDriver: true,
           }),
         ]),
@@ -50,9 +52,10 @@ export function VoiceButton({ voiceState, onPressIn, onPressOut, onCancel }: Voi
         pulseRef.current.stop();
         pulseRef.current = null;
       }
+      haloAnim.setValue(0);
       pulseAnim.setValue(1);
     }
-  }, [voiceState, pulseAnim]);
+  }, [voiceState, pulseAnim, haloAnim]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -94,7 +97,7 @@ export function VoiceButton({ voiceState, onPressIn, onPressOut, onCancel }: Voi
         : colors.recording
       : voiceState === 'processing'
         ? colors.processing
-        : colors.accent;
+        : colors.tint;
 
   const label =
     voiceState === 'recording'
@@ -105,29 +108,55 @@ export function VoiceButton({ voiceState, onPressIn, onPressOut, onCancel }: Voi
         ? '处理中'
         : '按住说话';
 
+  const haloScale = haloAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.9],
+  });
+  const haloOpacity = haloAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.35, 0],
+  });
+
   return (
     <View style={styles.anchor} {...panResponder.panHandlers}>
-      {/* 录音时的上方 X 取消区域 */}
+      {/* 录音时的上方取消区域 */}
       {voiceState === 'recording' && (
         <View style={[styles.cancelArea, isCanceling && styles.cancelAreaActive]}>
           <Text style={[styles.cancelIcon, isCanceling && styles.cancelIconActive]}>✕</Text>
         </View>
       )}
 
-      <Animated.View style={{ opacity: pulseAnim }}>
+      {/* 标签胶囊 */}
+      <View style={styles.labelPill}>
+        <Text style={styles.label}>{label}</Text>
+      </View>
+
+      <View style={styles.buttonWrap}>
+        {/* 录音呼吸光晕 */}
+        {voiceState === 'recording' && (
+          <Animated.View
+            style={[
+              styles.halo,
+              {
+                backgroundColor: bgColor,
+                opacity: haloOpacity,
+                transform: [{ scale: haloScale }],
+              },
+            ]}
+          />
+        )}
         <View style={[styles.button, { backgroundColor: bgColor }]}>
           {voiceState === 'processing' ? (
-             <Text style={styles.processingIcon}>···</Text>
+            <Text style={styles.processingIcon}>···</Text>
           ) : (
-             <View style={styles.micIcon}>
-               <View style={styles.micCapsule} />
-               <View style={styles.micArc} />
-               <View style={styles.micStem} />
-             </View>
+            <View style={styles.micIcon}>
+              <View style={styles.micCapsule} />
+              <View style={styles.micArc} />
+              <View style={styles.micStem} />
+            </View>
           )}
-          <Text style={styles.label}>{label}</Text>
         </View>
-      </Animated.View>
+      </View>
     </View>
   );
 }
@@ -135,33 +164,48 @@ export function VoiceButton({ voiceState, onPressIn, onPressOut, onCancel }: Voi
 const styles = StyleSheet.create({
   anchor: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 28,
     alignSelf: 'center',
     alignItems: 'center',
   },
+  buttonWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  halo: {
+    position: 'absolute',
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+  },
   button: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 6,
   },
   processingIcon: {
     color: '#FFFFFF',
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: '700',
-    marginBottom: 4,
+  },
+  labelPill: {
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: colors.barMaterial,
   },
   label: {
-    color: '#FFFFFF',
-    fontSize: 9,
+    color: colors.textSecondary,
+    fontSize: 12,
     fontWeight: '600',
-    marginTop: 6,
   },
   // CSS Mic Icon
   micIcon: {
@@ -170,17 +214,17 @@ const styles = StyleSheet.create({
     marginTop: -2,
   },
   micCapsule: {
-    width: 10,
-    height: 18,
+    width: 11,
+    height: 19,
     backgroundColor: '#ffffff',
-    borderRadius: 5,
+    borderRadius: 5.5,
     zIndex: 2,
   },
   micArc: {
     position: 'absolute',
     top: 6,
-    width: 16,
-    height: 12,
+    width: 17,
+    height: 13,
     borderBottomWidth: 2,
     borderLeftWidth: 2,
     borderRightWidth: 2,
@@ -191,7 +235,7 @@ const styles = StyleSheet.create({
   },
   micStem: {
     position: 'absolute',
-    top: 18,
+    top: 19,
     width: 2,
     height: 5,
     backgroundColor: '#ffffff',
@@ -199,19 +243,13 @@ const styles = StyleSheet.create({
   // 取消区域
   cancelArea: {
     position: 'absolute',
-    top: -80,
+    top: -84,
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#EAEAE6',
+    backgroundColor: colors.fill,
     justifyContent: 'center',
     alignItems: 'center',
-    // 添加一点阴影使其悬浮感更强
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
   },
   cancelAreaActive: {
     backgroundColor: colors.danger,

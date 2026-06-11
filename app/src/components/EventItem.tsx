@@ -1,7 +1,8 @@
 /**
- * EventItem — 单条日程行
+ * EventItem — iOS inset 列表行
  *
- * 扁平行设计：左侧 3px 色条 + 时间 + 标题，无卡片边框无阴影。
+ * 左侧彩色竖条 + 标题/备注，右侧时间徽标。
+ * hairline 分隔线从内容左缘开始（iOS 风格左缩进）。
  * 长按或点击 × 触发删除。
  */
 
@@ -26,28 +27,33 @@ function getBarColor(time: string | null): string {
 }
 
 export function EventItem({ event, isLast, onDelete }: EventItemProps) {
+  const barColor = getBarColor(event.time);
   return (
     <Pressable
-      style={[styles.row, !isLast && styles.rowBorder]}
+      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       onLongPress={() => onDelete(event)}
     >
-      <View style={[styles.bar, { backgroundColor: getBarColor(event.time) }]} />
-      <View style={styles.content}>
-        <Text style={styles.time}>
-          {event.time || '全天'}
-        </Text>
-        <Text style={styles.title}>{event.title}</Text>
-        {event.note ? (
-          <Text style={styles.note}>{event.note}</Text>
-        ) : null}
+      <View style={[styles.bar, { backgroundColor: barColor }]} />
+      <View style={[styles.content, !isLast && styles.contentBorder]}>
+        <View style={styles.info}>
+          <Text style={styles.title} numberOfLines={1}>{event.title}</Text>
+          {event.note ? (
+            <Text style={styles.note} numberOfLines={1}>{event.note}</Text>
+          ) : null}
+        </View>
+        <View style={styles.right}>
+          <Text style={[styles.time, { color: barColor }]}>
+            {event.time || '全天'}
+          </Text>
+          <Pressable
+            style={({ pressed }) => [styles.deleteBtn, pressed && styles.deleteBtnPressed]}
+            onPress={() => onDelete(event)}
+            hitSlop={8}
+          >
+            <Text style={styles.deleteIcon}>×</Text>
+          </Pressable>
+        </View>
       </View>
-      <Pressable
-        style={({ pressed }) => [styles.deleteBtn, pressed && styles.deleteBtnPressed]}
-        onPress={() => onDelete(event)}
-        hitSlop={8}
-      >
-        <Text style={styles.deleteIcon}>×</Text>
-      </Pressable>
     </Pressable>
   );
 }
@@ -55,48 +61,64 @@ export function EventItem({ event, isLast, onDelete }: EventItemProps) {
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    paddingRight: spacing.sm,
+    alignItems: 'stretch',
+    paddingLeft: spacing.lg,
   },
-  rowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+  rowPressed: {
+    backgroundColor: colors.fill,
   },
   bar: {
-    width: 3,
-    alignSelf: 'stretch',
+    width: 4,
     borderRadius: 2,
+    marginVertical: 14,
     marginRight: spacing.md,
   },
   content: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 13,
+    paddingRight: spacing.md,
   },
-  time: {
-    ...typography.caption,
-    color: colors.accent,
+  contentBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.separator,
+  },
+  info: {
+    flex: 1,
   },
   title: {
     ...typography.body,
-    marginTop: 2,
   },
   note: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    lineHeight: 18,
+    ...typography.footnote,
     marginTop: 2,
   },
+  right: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: spacing.sm,
+  },
+  time: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
   deleteBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: 4,
+    marginLeft: spacing.sm,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.fill,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   deleteBtnPressed: {
-    backgroundColor: colors.border,
+    backgroundColor: colors.textTertiary,
   },
   deleteIcon: {
-    color: colors.textTertiary,
-    fontSize: 18,
-    fontWeight: '400',
+    color: colors.textSecondary,
+    fontSize: 16,
+    fontWeight: '500',
+    lineHeight: 18,
   },
 });

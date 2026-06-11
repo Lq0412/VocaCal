@@ -50,7 +50,7 @@ import { VoiceButton } from '../components/VoiceButton';
 import { QuickPhrases } from '../components/QuickPhrases';
 import { DeleteModal } from '../components/DeleteModal';
 import { TodayBriefing } from '../components/TodayBriefing';
-import { colors, typography, spacing } from '../styles/theme';
+import { colors, typography, spacing, radius } from '../styles/theme';
 
 const today = new Date().toISOString().slice(0, 10);
 
@@ -366,16 +366,17 @@ export function CalendarScreen() {
             theme={{
               backgroundColor: colors.surface,
               calendarBackground: colors.surface,
-              todayTextColor: colors.accent,
-              selectedDayBackgroundColor: colors.primary,
-              arrowColor: colors.textSecondary,
+              todayTextColor: colors.tint,
+              selectedDayBackgroundColor: colors.tint,
+              arrowColor: colors.tint,
               monthTextColor: colors.primary,
               textDayFontWeight: '400',
-              textMonthFontWeight: '600',
-              textDayHeaderFontWeight: '500',
-              dotColor: colors.accent,
+              textMonthFontWeight: '700',
+              textDayHeaderFontWeight: '600',
+              dotColor: colors.tint,
               selectedDotColor: '#ffffff',
               textSectionTitleColor: colors.textSecondary,
+              textMonthFontSize: 18,
             }}
           />
         </View>
@@ -402,20 +403,24 @@ export function CalendarScreen() {
             onSubmitEditing={handleDebugSubmit}
             returnKeyType="send"
           />
-          <Pressable
-            style={({ pressed }) => [
-              styles.sendButton,
-              pressed && styles.sendButtonPressed,
-            ]}
-            onPress={handleDebugSubmit}
-          >
-            <Text style={styles.sendText}>发送</Text>
-          </Pressable>
+          {debugText ? (
+            <Pressable
+              style={({ pressed }) => [
+                styles.sendButton,
+                pressed && styles.sendButtonPressed,
+              ]}
+              onPress={handleDebugSubmit}
+            >
+              <Text style={styles.sendText}>发送</Text>
+            </Pressable>
+          ) : null}
         </View>
 
         {/* 状态消息 */}
         {statusMessage ? (
-          <Text style={styles.statusText}>{statusMessage}</Text>
+          <View style={styles.statusBanner}>
+            <Text style={styles.statusText}>{statusMessage}</Text>
+          </View>
         ) : null}
 
         {/* 日程列表标题 */}
@@ -424,21 +429,23 @@ export function CalendarScreen() {
           <Text style={styles.sectionCount}>{selectedEvents.length} 个日程</Text>
         </View>
 
-        {/* 日程列表 */}
-        <View style={styles.eventListInner}>
-          {selectedEvents.length === 0 ? (
+        {/* 日程列表（inset grouped） */}
+        {selectedEvents.length === 0 ? (
+          <View style={styles.eventGroup}>
             <EmptyState />
-          ) : (
-            selectedEvents.map((event, index) => (
+          </View>
+        ) : (
+          <View style={styles.eventGroup}>
+            {selectedEvents.map((event, index) => (
               <EventItem
                 key={event.id}
                 event={event}
                 isLast={index === selectedEvents.length - 1}
                 onDelete={handleEventDelete}
               />
-            ))
-          )}
-        </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       {/* 语音按钮 */}
@@ -484,60 +491,63 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   mainScrollContent: {
-    paddingBottom: 120, // 给底部的悬浮语音按钮留出空间
-    paddingTop: spacing.sm,
+    paddingBottom: 150, // 给底部的悬浮语音按钮留出空间
+    paddingTop: spacing.xs,
   },
 
   // --- 日历 ---
   calendarWrap: {
     backgroundColor: colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderRadius: radius.lg,
     overflow: 'hidden',
+    paddingVertical: spacing.xs,
   },
 
   // --- 文本输入 ---
   inputRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.sm,
     marginTop: spacing.md,
   },
   textInput: {
     flex: 1,
-    height: 42,
+    height: 44,
     backgroundColor: colors.surface,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: 14,
-    fontSize: 14,
+    borderRadius: radius.md,
+    paddingHorizontal: 16,
+    fontSize: 16,
     color: colors.primary,
   },
   sendButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    height: 42,
+    backgroundColor: colors.tint,
+    borderRadius: radius.md,
+    paddingHorizontal: 18,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
   },
   sendButtonPressed: {
-    opacity: 0.8,
+    opacity: 0.6,
   },
   sendText: {
     color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 16,
+    fontWeight: '600',
   },
 
   // --- 状态消息 ---
+  statusBanner: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.md,
+  },
   statusText: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    lineHeight: 18,
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.xs,
+    ...typography.subhead,
+    color: colors.textBody,
+    lineHeight: 20,
   },
 
   // --- 日程列表 ---
@@ -547,15 +557,18 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     paddingTop: spacing.xl,
     paddingBottom: spacing.sm,
+    paddingHorizontal: spacing.xs,
   },
   sectionTitle: {
-    ...typography.subtitle,
+    ...typography.title2,
   },
   sectionCount: {
-    ...typography.caption,
+    ...typography.footnote,
     color: colors.textTertiary,
   },
-  eventListInner: {
-    marginTop: spacing.sm,
+  eventGroup: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
   },
 });

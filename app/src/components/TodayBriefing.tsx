@@ -1,6 +1,12 @@
+/**
+ * TodayBriefing — 今日概览卡片（iOS 风格）
+ *
+ * 白底圆角、无阴影，左侧系统色圆形图标 + 标题/副标题。
+ */
+
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, spacing, typography } from '../styles/theme';
+import { colors, spacing, typography, radius } from '../styles/theme';
 import type { CalendarEvent } from '../types/event';
 
 interface TodayBriefingProps {
@@ -11,7 +17,7 @@ export function TodayBriefing({ events }: TodayBriefingProps) {
   if (events.length === 0) {
     return (
       <View style={styles.container}>
-        <View style={styles.iconContainer}>
+        <View style={[styles.iconContainer, { backgroundColor: colors.success }]}>
           <Text style={styles.icon}>☕</Text>
         </View>
         <View style={styles.textContainer}>
@@ -56,18 +62,26 @@ export function TodayBriefing({ events }: TodayBriefingProps) {
     summary = '今天只有这 1 个安排，很轻松';
   }
 
+  const iconBg = events.length >= 4
+    ? colors.danger
+    : nextEvent
+      ? colors.tint
+      : colors.timeEvening;
+  const iconText = events.length >= 4 ? '🔥' : nextEvent ? '⏰' : '📝';
+
   return (
-    <View style={[styles.container, { borderColor: nextEvent ? colors.accent : colors.border }]}>
-      <View style={[styles.iconContainer, nextEvent && { backgroundColor: '#FDF1EB' }]}>
-        <Text style={styles.icon}>{events.length >= 4 ? '🔥' : nextEvent ? '⏰' : '📝'}</Text>
+    <View style={styles.container}>
+      <View style={[styles.iconContainer, { backgroundColor: iconBg }]}>
+        <Text style={styles.icon}>{iconText}</Text>
       </View>
       <View style={styles.textContainer}>
-        <Text style={styles.title}>
-          今日 {events.length} 个日程
-        </Text>
-        <Text style={[styles.subtitle, nextEvent && { color: colors.accent }]}>
-          {nextEvent 
-            ? `下一项：${nextEvent.time} ${nextEvent.title} (${timeStr})`
+        <Text style={styles.title}>今日 {events.length} 个日程</Text>
+        <Text
+          style={[styles.subtitle, nextEvent && { color: colors.tint, fontWeight: '600' }]}
+          numberOfLines={1}
+        >
+          {nextEvent
+            ? `下一项 · ${nextEvent.time} ${nextEvent.title}（${timeStr}）`
             : summary}
         </Text>
       </View>
@@ -80,37 +94,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: radius.lg,
     padding: spacing.md,
     marginTop: spacing.md,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
   },
   iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.background,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.md,
   },
   icon: {
-    fontSize: 20,
+    fontSize: 22,
   },
   textContainer: {
     flex: 1,
   },
   title: {
-    ...typography.subtitle,
-    fontSize: 15,
+    ...typography.headline,
   },
   subtitle: {
-    ...typography.caption,
-    marginTop: 4,
+    ...typography.subhead,
+    marginTop: 3,
   },
 });
