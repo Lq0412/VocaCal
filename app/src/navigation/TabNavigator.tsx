@@ -5,11 +5,13 @@
 import React from 'react';
 import { Text, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CalendarScreen } from '../screens/CalendarScreen';
 import { WeekScreen } from '../screens/WeekScreen';
 import { InsightsScreen } from '../screens/InsightsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { colors } from '../styles/theme';
+import { TAB_BAR_CONTENT_HEIGHT } from './tabBarLayout';
 import type { RootTabParamList } from './types';
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -21,13 +23,19 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
 }
 
 export function TabNavigator() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.tint,
         tabBarInactiveTintColor: colors.textSecondary,
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: {
+          ...styles.tabBar,
+          height: TAB_BAR_CONTENT_HEIGHT + insets.bottom,
+          paddingBottom: insets.bottom,
+        },
         tabBarLabelStyle: styles.tabLabel,
       }}
     >
@@ -72,7 +80,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.barMaterial,
     borderTopColor: colors.border,
     borderTopWidth: StyleSheet.hairlineWidth,
-    height: 56,
     paddingTop: 4,
   },
   tabLabel: {

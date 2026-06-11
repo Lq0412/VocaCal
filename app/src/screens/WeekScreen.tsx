@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { useDatabase } from '../hooks/useDatabase';
 import type { RootTabParamList } from '../navigation/types';
+import { useTabBarLayout } from '../navigation/tabBarLayout';
 import { getEventsByDateRange } from '../services/storageService';
 import type { CalendarEvent } from '../types/event';
 import { colors, typography, spacing, radius } from '../styles/theme';
@@ -36,6 +37,7 @@ const MAX_PREVIEW = 3;
 
 export function WeekScreen() {
   const navigation = useNavigation<Nav>();
+  const { scrollBottomPadding } = useTabBarLayout();
   const { ready, error } = useDatabase();
   const weekBounds = useMemo(() => getWeekBounds(), []);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -92,7 +94,7 @@ export function WeekScreen() {
 
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={{ paddingBottom: scrollBottomPadding }}
           showsVerticalScrollIndicator={false}
         >
           {/* 周概览统计 */}
@@ -195,9 +197,6 @@ const styles = StyleSheet.create({
   },
   scroll: {
     flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: spacing.xxl,
   },
   statsRow: {
     flexDirection: 'row',

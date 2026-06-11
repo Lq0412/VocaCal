@@ -66,6 +66,7 @@ import { BatchConfirmCard } from '../components/BatchConfirmCard';
 import { UndoBanner } from '../components/UndoBanner';
 import { colors, typography, spacing, radius } from '../styles/theme';
 import type { RootTabParamList } from '../navigation/types';
+import { useTabBarLayout } from '../navigation/tabBarLayout';
 import { formatDateLabel, todayISO } from '../utils/dateUtils';
 
 const today = todayISO;
@@ -74,6 +75,7 @@ type ScheduleRoute = RouteProp<RootTabParamList, 'Schedule'>;
 /** 主界面组件 */
 export function CalendarScreen() {
   const route = useRoute<ScheduleRoute>();
+  const { scrollBottomPaddingWithVoice, voiceButtonBottomOffset } = useTabBarLayout();
   const [selectedDate, setSelectedDate] = useState(
     () => route.params?.selectedDate ?? today,
   );
@@ -487,7 +489,7 @@ export function CalendarScreen() {
   // ==================== 渲染 ====================
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.container}>
         {/* 标题栏 */}
         <Header onTodayPress={() => {
@@ -497,7 +499,10 @@ export function CalendarScreen() {
 
         <ScrollView
           style={styles.mainScroll}
-          contentContainerStyle={styles.mainScrollContent}
+          contentContainerStyle={[
+            styles.mainScrollContent,
+            { paddingBottom: scrollBottomPaddingWithVoice },
+          ]}
           showsVerticalScrollIndicator={false}
         >
           {/* 日历组件 */}
@@ -658,7 +663,7 @@ export function CalendarScreen() {
           onPressIn={handleVoiceStart}
           onPressOut={handleVoiceStop}
           onCancel={handleVoiceCancel}
-          bottomOffset={88}
+          bottomOffset={voiceButtonBottomOffset}
         />
 
         {/* 删除确认弹窗 */}
@@ -688,7 +693,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   mainScrollContent: {
-    paddingBottom: 200,
     paddingTop: spacing.xs,
   },
 

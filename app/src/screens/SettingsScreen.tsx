@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { useTabBarLayout } from '../navigation/tabBarLayout';
 import { API_BASE_URL } from '../services/apiService';
 import { clearAllEvents } from '../services/storageService';
 import { colors, typography, spacing, radius } from '../styles/theme';
@@ -20,6 +21,7 @@ import { colors, typography, spacing, radius } from '../styles/theme';
 const APP_VERSION = '0.0.1';
 
 export function SettingsScreen() {
+  const { scrollBottomPadding } = useTabBarLayout();
   const handleClearData = useCallback(() => {
     Alert.alert(
       '清除所有日程',
@@ -45,7 +47,7 @@ export function SettingsScreen() {
 
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={{ paddingBottom: scrollBottomPadding }}
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.sectionHeader}>服务</Text>
@@ -131,9 +133,6 @@ const styles = StyleSheet.create({
   },
   scroll: {
     flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: spacing.xxl,
   },
   sectionHeader: {
     ...typography.footnote,

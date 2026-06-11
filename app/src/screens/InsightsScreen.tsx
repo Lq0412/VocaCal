@@ -15,6 +15,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { useDatabase } from '../hooks/useDatabase';
+import { useTabBarLayout } from '../navigation/tabBarLayout';
 import { getAllEvents } from '../services/storageService';
 import { colors, typography, spacing, radius } from '../styles/theme';
 import { formatDateLabel, getWeekBounds } from '../utils/dateUtils';
@@ -22,6 +23,7 @@ import { getCurrentWeekInsights, type WeekInsights } from '../utils/insightsUtil
 
 export function InsightsScreen() {
   const { ready, error } = useDatabase();
+  const { scrollBottomPadding } = useTabBarLayout();
   const [insights, setInsights] = useState<WeekInsights | null>(null);
 
   const loadInsights = useCallback(async () => {
@@ -52,7 +54,7 @@ export function InsightsScreen() {
 
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={{ paddingBottom: scrollBottomPadding }}
           showsVerticalScrollIndicator={false}
         >
           {error ? (
@@ -172,9 +174,6 @@ const styles = StyleSheet.create({
   },
   scroll: {
     flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: spacing.xxl,
   },
   metricRow: {
     flexDirection: 'row',
