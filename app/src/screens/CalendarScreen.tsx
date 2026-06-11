@@ -21,6 +21,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useFocusEffect, useRoute } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
 import { Calendar } from 'react-native-calendars';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { parseTextIntent, API_BASE_URL } from '../services/apiService';
@@ -63,12 +65,18 @@ import { ParseResultCard } from '../components/ParseResultCard';
 import { BatchConfirmCard } from '../components/BatchConfirmCard';
 import { UndoBanner } from '../components/UndoBanner';
 import { colors, typography, spacing, radius } from '../styles/theme';
+import type { RootTabParamList } from '../navigation/types';
+import { formatDateLabel, todayISO } from '../utils/dateUtils';
 
-const today = new Date().toISOString().slice(0, 10);
+const today = todayISO;
+type ScheduleRoute = RouteProp<RootTabParamList, 'Schedule'>;
 
 /** 主界面组件 */
 export function CalendarScreen() {
-  const [selectedDate, setSelectedDate] = useState(today);
+  const route = useRoute<ScheduleRoute>();
+  const [selectedDate, setSelectedDate] = useState(
+    () => route.params?.selectedDate ?? today,
+  );
   const [selectedEvents, setSelectedEvents] = useState<CalendarEvent[]>([]);
   const [eventDates, setEventDates] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState('');
@@ -90,6 +98,17 @@ export function CalendarScreen() {
       .then(() => setDbReady(true))
       .catch((e: any) => setStatusMessage('数据库错误: ' + (e?.message || String(e))));
   }, []);
+
+  // 从周视图等 Tab 跳转时同步选中日期
+  useFocusEffect(
+    useCallback(() => {
+      const date = route.params?.selectedDate;
+      if (date) {
+        setSelectedDate(date);
+        setRangeGroups(null);
+      }
+    }, [route.params?.selectedDate]),
+  );
 
   // --- 加载事件（日期变化或数据库就绪时） ---
   useEffect(() => {
@@ -639,6 +658,7 @@ export function CalendarScreen() {
           onPressIn={handleVoiceStart}
           onPressOut={handleVoiceStop}
           onCancel={handleVoiceCancel}
+          bottomOffset={88}
         />
 
         {/* 删除确认弹窗 */}
@@ -651,14 +671,6 @@ export function CalendarScreen() {
       </View>
     </SafeAreaView>
   );
-}
-
-// ==================== 工具函数 ====================
-
-function formatDateLabel(dateString: string) {
-  const d = new Date(dateString + 'T00:00:00');
-  const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()];
-  return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + weekday;
 }
 
 // ==================== 样式 ====================
@@ -676,7 +688,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   mainScrollContent: {
-    paddingBottom: 150,
+    paddingBottom: 200,
     paddingTop: spacing.xs,
   },
 

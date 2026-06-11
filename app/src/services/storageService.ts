@@ -191,6 +191,20 @@ export async function updateEvent(
 /**
  * 获取所有有事件的日期列表（用于日历标记小圆点）
  */
+export async function getAllEvents(): Promise<CalendarEvent[]> {
+  const result = await executeSql(
+    `SELECT id, title, date, time, note, created_at, updated_at
+     FROM events
+     ORDER BY date ASC, time ASC`,
+  );
+
+  return sortEventsBySchedule(rowsToEvents(result));
+}
+
+export async function clearAllEvents(): Promise<void> {
+  await executeSql('DELETE FROM events');
+}
+
 export async function getAllEventDates(): Promise<string[]> {
   const result = await executeSql(
     'SELECT DISTINCT date FROM events ORDER BY date',

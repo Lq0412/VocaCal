@@ -15,9 +15,17 @@ interface VoiceButtonProps {
   onPressIn: () => void;
   onPressOut: () => void;
   onCancel: () => void;
+  /** Tab 底栏存在时抬高按钮，避免遮挡 */
+  bottomOffset?: number;
 }
 
-export function VoiceButton({ voiceState, onPressIn, onPressOut, onCancel }: VoiceButtonProps) {
+export function VoiceButton({
+  voiceState,
+  onPressIn,
+  onPressOut,
+  onCancel,
+  bottomOffset = 28,
+}: VoiceButtonProps) {
   const [pulseAnim] = useState(new Animated.Value(1));
   const [haloAnim] = useState(new Animated.Value(0));
   const [isCanceling, setIsCanceling] = useState(false);
@@ -118,7 +126,7 @@ export function VoiceButton({ voiceState, onPressIn, onPressOut, onCancel }: Voi
   });
 
   return (
-    <View style={styles.anchor} {...panResponder.panHandlers}>
+    <View style={[styles.anchor, { bottom: bottomOffset }]} {...panResponder.panHandlers}>
       {/* 录音时的上方取消区域 */}
       {voiceState === 'recording' && (
         <View style={[styles.cancelArea, isCanceling && styles.cancelAreaActive]}>
@@ -164,7 +172,6 @@ export function VoiceButton({ voiceState, onPressIn, onPressOut, onCancel }: Voi
 const styles = StyleSheet.create({
   anchor: {
     position: 'absolute',
-    bottom: 28,
     alignSelf: 'center',
     alignItems: 'center',
   },

@@ -1,13 +1,16 @@
 import React from 'react';
 import { StatusBar } from 'react-native';
+import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { CalendarScreen } from './src/screens/CalendarScreen';
+import { TabNavigator } from './src/navigation/TabNavigator';
 
 function App() {
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="dark-content" backgroundColor="#F6F5F2" />
-      <CalendarScreen />
+      <NavigationContainer>
+        <StatusBar barStyle="dark-content" backgroundColor="#F2F2F7" />
+        <TabNavigator />
+      </NavigationContainer>
     </SafeAreaProvider>
   );
 }
