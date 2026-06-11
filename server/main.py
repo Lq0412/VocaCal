@@ -11,12 +11,20 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from starlette.websockets import WebSocketState
 
 from models.schemas import NLUParseRequest, NLUResult, VoiceProcessResponse
 from services import nlu, xf_asr, xf_asr_stream, xf_tts
 
+try:
+    from uvicorn.protocols.utils import ClientDisconnected
+except ImportError:  # 单元测试环境可能未安装 uvicorn
+    ClientDisconnected = WebSocketDisconnect  # type: ignore[misc, assignment]
+
 logger = logging.getLogger("vocacal")
 logging.basicConfig(level=logging.INFO)
+
+_WS_DISCONNECT_ERRORS = (WebSocketDisconnect, ClientDisconnected)
 
 # TTS 预合成缓存：主管线返回时异步启动 TTS 合成，前端请求时直接命中
 _tts_cache: OrderedDict[str, asyncio.Task] = OrderedDict()
@@ -188,6 +196,17 @@ def _build_reply(result: NLUResult) -> str:
     return "抱歉没理解，试试说：明天下午三点开会"
 
 
+def _ws_result_payload(text: str, result: NLUResult, reply_text: str) -> dict:
+    """构造 WebSocket 结果帧，确保嵌套 NLUResult 可 JSON 序列化"""
+    return {
+        "type": "result",
+        "text": text,
+        "intent": result.intent,
+        "event": result.to_json_dict() if result.intent else None,
+        "reply_text": reply_text,
+    }
+
+
 def _audio_to_pcm(audio_bytes: bytes) -> bytes:
     """将上传音频转为 PCM 16kHz 16bit mono。WAV 直接跳过 44 字节头，其他格式用 pydub 转换。"""
     if audio_bytes[:4] == b"RIFF":
@@ -308,27 +327,31 @@ async def ws_voice(websocket: WebSocket):
         logger.info(f"[WS] NLU done in {time.monotonic()-t0:.1f}s: intent={result.intent}")
 
         reply_text = _build_reply(result)
-        _schedule_tts(reply_text)
 
         logger.info(f"[WS] Total: {time.monotonic()-t_start:.1f}s")
 
-        await websocket.send_json({
-            "type": "result",
-            "text": text,
-            "intent": result.intent,
-            "event": result.model_dump() if result.intent else None,
-            "reply_text": reply_text,
-        })
+        if websocket.client_state == WebSocketState.CONNECTED:
+            await websocket.send_json(_ws_result_payload(text, result, reply_text))
+        else:
+            logger.info("[WS] Client already disconnected before send")
 
-    except WebSocketDisconnect:
+        try:
+            _schedule_tts(reply_text)
+        except Exception:
+            logger.exception("[WS] TTS pre-schedule failed (non-fatal)")
+
+    except _WS_DISCONNECT_ERRORS:
         logger.info("[WS] Client disconnected during processing")
         await asr.cancel()
-    except Exception as e:
-        logger.error(f"[WS] Error: {e}")
+    except Exception:
+        logger.exception("[WS] Error")
         try:
-            await websocket.send_json({"type": "error", "message": "处理出错，请重试"})
-        except Exception:
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.send_json({"type": "error", "message": "处理出错，请重试"})
+        except _WS_DISCONNECT_ERRORS:
             pass
+        except Exception:
+            logger.exception("[WS] Failed to send error frame")
         await asr.cancel()
 
 

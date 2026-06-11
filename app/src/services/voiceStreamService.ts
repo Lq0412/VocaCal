@@ -120,6 +120,7 @@ export function stopStream(): Promise<StreamResult> {
     resultResolver = resolve;
     resultRejecter = reject;
 
+    // ASR + NLU 合计可能接近 15s，留足余量避免客户端先断开导致服务端 send 失败
     setTimeout(() => {
       if (resultRejecter) {
         resultRejecter(new Error('处理超时'));
@@ -127,7 +128,7 @@ export function stopStream(): Promise<StreamResult> {
         resultRejecter = null;
         cleanup();
       }
-    }, 15000);
+    }, 30000);
   });
 }
 

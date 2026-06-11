@@ -47,6 +47,10 @@ class NLUResult(BaseModel):
     reply: Optional[str] = None
     raw: str = ""
 
+    def to_json_dict(self) -> dict:
+        """WebSocket / JSON 序列化安全字典（嵌套 model 转为 plain dict）"""
+        return self.model_dump(mode="json")
+
 
 class VoiceProcessResponse(BaseModel):
     """语音处理完整响应"""
