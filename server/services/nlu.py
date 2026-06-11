@@ -78,6 +78,11 @@ async def parse_intent(text: str) -> NLUResult:
         content = resp.json()["choices"][0]["message"]["content"]
         logger.info(f"DeepSeek response ({time.monotonic()-t0:.1f}s): {content!r}")
 
+        # DeepSeek 偶尔返回空字符串（如触发内容安全过滤），直接返回未知意图
+        if not content or not content.strip():
+            logger.warning("DeepSeek returned empty content, treating as unknown intent")
+            return NLUResult(intent=None, raw=text)
+
         parsed = _extract_json(content)
         return NLUResult(
             intent=parsed.get("intent"),

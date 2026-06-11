@@ -316,11 +316,12 @@ async def ws_voice(websocket: WebSocket):
         })
 
     except WebSocketDisconnect:
+        logger.info("[WS] Client disconnected during processing")
         await asr.cancel()
     except Exception as e:
         logger.error(f"[WS] Error: {e}")
         try:
-            await websocket.send_json({"type": "error", "message": str(e)})
+            await websocket.send_json({"type": "error", "message": "处理出错，请重试"})
         except Exception:
             pass
         await asr.cancel()
